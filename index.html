@@ -2,94 +2,135 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>EXTREME GPU/CPU Stress Test</title>
+  <title>BROWSER DESTROYER 9000</title>
   <style>
-    body { background: #000; color: #f00; font-family: monospace; margin: 0; }
-    button { padding: 1em; margin: 0.5em; font-size: 1.2em; background: #f00; color: #000; border: none; }
-    #renderArea { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: -1; }
+    body { margin: 0; overflow: hidden; background: #000; }
+    #doomsday { 
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      font-size: 5em;
+      color: red;
+      text-align: center;
+      padding-top: 40vh;
+      z-index: 100;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
-  <div id="renderArea"></div>
-  <div style="position: fixed; bottom: 0; width: 100%; text-align: center;">
-    <button id="nuke">NUKE BROWSER</button>
-    <div id="status" style="font-size: 2em; margin: 1em;"></div>
-  </div>
+  <div id="doomsday">YOUR BROWSER WILL DIE IN...</div>
+  <div id="hell"></div>
 
+  <!-- Three.js -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
+  
   <script>
-    const nukeButton = document.getElementById('nuke');
-    const status = document.getElementById('status');
-    let nuking = false;
-    let startTime = 0;
+    // Phase 1: GPU Apocalypse
+    const renderer = new THREE.WebGLRenderer({ antialias: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('hell').appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.z = 5;
+
+    // Create 500 spinning high-poly objects
+    const objects = [];
+    for(let i=0; i<500; i++) {
+      const geometry = new THREE.SphereGeometry(0.3, 512, 512);
+      const material = new THREE.MeshBasicMaterial({ 
+        color: Math.random() * 0xffffff,
+        wireframe: true
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(
+        (Math.random() - 0.5) * 20,
+        (Math.random() - 0.5) * 20,
+        (Math.random() - 0.5) * 20
+      );
+      scene.add(mesh);
+      objects.push(mesh);
+    }
+
+    // Phase 2: CPU Armageddon
+    const startTime = Date.now();
+    const countdown = document.getElementById('doomsday');
     
-    nukeButton.onclick = () => {
-      if(nuking) return;
-      nuking = true;
-      startTime = Date.now();
-      status.textContent = "NUKE ACTIVATED - PREPARE FOR IMPACT";
+    const destroyCPU = () => {
+      // Infinite loop with memory allocation
+      let memoryHog = [];
+      while(true) {
+        // Allocate 100MB chunks
+        for(let i=0; i<100; i++) {
+          memoryHog.push(new Float64Array(12500000));
+        }
+        
+        // Heavy math operations
+        let sum = 0;
+        for(let i=0; i<10000000; i++) {
+          sum += Math.sqrt(i) * Math.tan(i) * Math.random();
+        }
+        
+        // DOM stress
+        countdown.textContent = `MEMORY DESTROYED: ${(memoryHog.length * 100).toLocaleString()}MB`;
+      }
+    };
+
+    // Phase 3: Combined Attack
+    const animate = () => {
+      // Rotate all objects chaotically
+      for(let obj of objects) {
+        obj.rotation.x += Math.random() * 0.1;
+        obj.rotation.y += Math.random() * 0.1;
+        obj.position.x = Math.sin(Date.now() * 0.001 + obj.position.x) * 10;
+      }
       
-      // Extreme GPU Stress
-      const renderer = new THREE.WebGLRenderer({ antialias: false });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      document.getElementById('renderArea').appendChild(renderer.domElement);
-      
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-      camera.position.z = 5;
-      
-      // Create 100 high-poly spheres (GPU killer)
-      const spheres = [];
-      for(let i=0; i<100; i++) {
-        const geometry = new THREE.SphereGeometry(0.5, 256, 256);
+      // Add new objects continuously
+      if(Math.random() > 0.9) {
+        const geometry = new THREE.TorusKnotGeometry(0.5, 0.2, 512, 512);
         const material = new THREE.MeshBasicMaterial({ 
           color: Math.random() * 0xffffff,
           wireframe: true
         });
-        const sphere = new THREE.Mesh(geometry, material);
-        sphere.position.x = (Math.random() - 0.5) * 10;
-        sphere.position.y = (Math.random() - 0.5) * 10;
-        sphere.position.z = (Math.random() - 0.5) * 10;
-        scene.add(sphere);
-        spheres.push(sphere);
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(
+          (Math.random() - 0.5) * 20,
+          (Math.random() - 0.5) * 20,
+          (Math.random() - 0.5) * 20
+        );
+        scene.add(mesh);
+        objects.push(mesh);
       }
       
-      // Extreme CPU Stress (Main Thread Blocker)
-      const cpuKiller = () => {
-        let sum = 0;
-        while(true) {
-          for(let i=0; i<10000000; i++) {
-            sum += Math.sqrt(i) * Math.random();
-          }
-          const elapsed = ((Date.now() - startTime)/1000).toFixed(1);
-          status.textContent = `NUKE ACTIVE - ${elapsed}s - SUM: ${sum.toExponential(2)}`;
-          
-          // Add more stress over time
-          if(Date.now() - startTime > 5000) {
-            for(let i=0; i<1000000; i++) {
-              new ArrayBuffer(1000000);
-            }
-          }
-        }
-      };
-      
-      // Animation Loop (GPU Stress)
-      const animate = () => {
-        if(!nuking) return;
-        
-        for(let sphere of spheres) {
-          sphere.rotation.x += 0.05;
-          sphere.rotation.y += 0.05;
-          sphere.scale.x = Math.sin(Date.now() * 0.001) * 0.5 + 1;
-        }
-        
-        renderer.render(scene, camera);
-        requestAnimationFrame(animate);
-      };
-      
-      animate();
-      setTimeout(cpuKiller, 1000); // Let GPU stress start first
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
     };
+
+    // Countdown to destruction
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - startTime)/1000;
+      countdown.textContent = `YOUR BROWSER WILL DIE IN... ${(5 - elapsed).toFixed(1)}`;
+      
+      if(elapsed >= 5) {
+        clearInterval(timer);
+        countdown.textContent = "EXECUTING FINAL DESTRUCTION SEQUENCE";
+        setTimeout(destroyCPU, 100);
+      }
+    }, 100);
+
+    // Start the GPU stress immediately
+    animate();
+
+    // Resize handler for extra stress
+    window.addEventListener('resize', () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      document.body.appendChild(document.createElement('div'));
+    });
   </script>
 </body>
 </html>
