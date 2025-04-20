@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>EXTREME GPU/CPU Stress Test</title>
+  <style>
+    body { background: #000; color: #f00; font-family: monospace; margin: 0; }
+    button { padding: 1em; margin: 0.5em; font-size: 1.2em; background: #f00; color: #000; border: none; }
+    #renderArea { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: -1; }
+  </style>
+</head>
+<body>
+  <div id="renderArea"></div>
+  <div style="position: fixed; bottom: 0; width: 100%; text-align: center;">
+    <button id="nuke">NUKE BROWSER</button>
+    <div id="status" style="font-size: 2em; margin: 1em;"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
+  <script>
+    const nukeButton = document.getElementById('nuke');
+    const status = document.getElementById('status');
+    let nuking = false;
+    let startTime = 0;
+    
+    nukeButton.onclick = () => {
+      if(nuking) return;
+      nuking = true;
+      startTime = Date.now();
+      status.textContent = "NUKE ACTIVATED - PREPARE FOR IMPACT";
+      
+      // Extreme GPU Stress
+      const renderer = new THREE.WebGLRenderer({ antialias: false });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.getElementById('renderArea').appendChild(renderer.domElement);
+      
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+      camera.position.z = 5;
+      
+      // Create 100 high-poly spheres (GPU killer)
+      const spheres = [];
+      for(let i=0; i<100; i++) {
+        const geometry = new THREE.SphereGeometry(0.5, 256, 256);
+        const material = new THREE.MeshBasicMaterial({ 
+          color: Math.random() * 0xffffff,
+          wireframe: true
+        });
+        const sphere = new THREE.Mesh(geometry, material);
+        sphere.position.x = (Math.random() - 0.5) * 10;
+        sphere.position.y = (Math.random() - 0.5) * 10;
+        sphere.position.z = (Math.random() - 0.5) * 10;
+        scene.add(sphere);
+        spheres.push(sphere);
+      }
+      
+      // Extreme CPU Stress (Main Thread Blocker)
+      const cpuKiller = () => {
+        let sum = 0;
+        while(true) {
+          for(let i=0; i<10000000; i++) {
+            sum += Math.sqrt(i) * Math.random();
+          }
+          const elapsed = ((Date.now() - startTime)/1000).toFixed(1);
+          status.textContent = `NUKE ACTIVE - ${elapsed}s - SUM: ${sum.toExponential(2)}`;
+          
+          // Add more stress over time
+          if(Date.now() - startTime > 5000) {
+            for(let i=0; i<1000000; i++) {
+              new ArrayBuffer(1000000);
+            }
+          }
+        }
+      };
+      
+      // Animation Loop (GPU Stress)
+      const animate = () => {
+        if(!nuking) return;
+        
+        for(let sphere of spheres) {
+          sphere.rotation.x += 0.05;
+          sphere.rotation.y += 0.05;
+          sphere.scale.x = Math.sin(Date.now() * 0.001) * 0.5 + 1;
+        }
+        
+        renderer.render(scene, camera);
+        requestAnimationFrame(animate);
+      };
+      
+      animate();
+      setTimeout(cpuKiller, 1000); // Let GPU stress start first
+    };
+  </script>
+</body>
+</html>
