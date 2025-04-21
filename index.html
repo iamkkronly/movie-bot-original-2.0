@@ -1,305 +1,243 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>ANDROID SYSTEM ANNIHILATION</title>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #000;
-            color: #f00;
-            font-family: monospace;
-            touch-action: none;
-            user-select: none;
-            -webkit-user-select: none;
-            -webkit-touch-callout: none;
-        }
-        #warning {
-            position: fixed;
-            top: 10px;
-            left: 0;
-            width: 100%;
-            text-align: center;
-            font-size: 24px;
-            color: #ff0;
-            font-weight: bold;
-            z-index: 10000;
-            text-shadow: 0 0 10px #f00;
-            animation: blink 0.5s infinite;
-        }
-        #counters {
-            position: fixed;
-            bottom: 10px;
-            left: 0;
-            width: 100%;
-            text-align: center;
-            font-size: 16px;
-            color: #0f0;
-            z-index: 10000;
-        }
-        .overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            background: radial-gradient(circle, transparent, rgba(255,0,0,0.2));
-            z-index: 9999;
-            mix-blend-mode: screen;
-            animation: pulse 2s infinite;
-        }
-        @keyframes blink {
-            0% { opacity: 0.2; }
-            50% { opacity: 1; }
-            100% { opacity: 0.2; }
-        }
-        @keyframes pulse {
-            0% { opacity: 0.3; }
-            50% { opacity: 0.7; }
-            100% { opacity: 0.3; }
-        }
-        canvas {
-            position: fixed;
-            top: 0;
-            left: 0;
-            z-index: 1;
-        }
-        #debug {
-            position: fixed;
-            bottom: 40px;
-            left: 0;
-            width: 100%;
-            text-align: center;
-            font-size: 12px;
-            color: #ff0;
-            z-index: 10000;
-        }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>ANDROID SYSTEM ANNIHILATION - Particle Overload</title>
+<style>
+  body {
+    margin: 0; padding: 0; overflow: hidden;
+    background-color: #000; color: #f00;
+    font-family: monospace;
+    user-select: none;
+  }
+  #warning {
+    position: fixed; top: 10px; left: 0; width: 100%;
+    text-align: center; font-size: 24px; color: #ff0;
+    font-weight: bold; z-index: 10000;
+    text-shadow: 0 0 10px #f00;
+    animation: blink 0.5s infinite;
+  }
+  #counters {
+    position: fixed; bottom: 10px; left: 0; width: 100%;
+    text-align: center; font-size: 16px; color: #0f0;
+    z-index: 10000;
+  }
+  #debug {
+    position: fixed; bottom: 40px; left: 0; width: 100%;
+    text-align: center; font-size: 12px; color: #ff0;
+    z-index: 10000;
+  }
+  @keyframes blink {
+    0% {opacity: 0.2;} 50% {opacity: 1;} 100% {opacity: 0.2;}
+  }
+  canvas {
+    position: fixed; top: 0; left: 0; z-index: 1;
+  }
+</style>
 </head>
 <body>
-    <div id="warning">⚠️ ANDROID SYSTEM MELTDOWN ⚠️<br>CRITICAL KERNEL FAILURE</div>
-    <div id="counters">INITIATING SYSTEM OVERLOAD...</div>
-    <div id="debug"></div>
-    <div class="overlay"></div>
+<div id="warning">⚠️ ANDROID SYSTEM MELTDOWN ⚠️<br>CRITICAL KERNEL FAILURE</div>
+<div id="counters">INITIATING SYSTEM OVERLOAD...</div>
+<div id="debug"></div>
 
-    <!-- Three.js library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+  // Config
+  const CONFIG = {
+    INITIAL_PARTICLES_TOTAL: 500000,  // total particles across all renderers initially
+    PARTICLES_ADD_PER_SEC: 100000,    // particles added per second per renderer
+    MAX_PARTICLES_PER_RENDERER: 5000000, // cap per renderer
+    WEBGL_CONTEXTS: 4,
+    MESH_COUNT: 200,
+    GEOMETRY_COMPLEXITY: 2,
+  };
 
-    <script>
-        // Configuration
-        const ANDROID_KILLER_CONFIG = {
-            INITIAL_PARTICLE_COUNT: 500000,  // Starting particles per all renderers combined
-            PARTICLES_TO_ADD_PER_SEC: 10000, // Number of particles to add every second per renderer
-            MESH_COUNT: 200,
-            WEBGL_CONTEXTS: 4,
-            GEOMETRY_COMPLEXITY: 2,
-        };
+  const STATE = {
+    renderers: [],
+    lastFPS: 0,
+    lastFrameTime: performance.now(),
+    crashCount: 0,
+  };
 
-        const ANDROID_DESTROYER = {
-            renderers: [],
-            lastFPS: 0,
-            _lastFrameTime: performance.now(),
-            crashCount: 0,
-        };
+  // Update debug info
+  function updateDebug() {
+    const debug = document.getElementById('debug');
+    const perRenderer = STATE.renderers.length > 0 ? STATE.renderers[0].particleCount : 0;
+    debug.textContent = `FPS: ${STATE.lastFPS} | Renderers: ${STATE.renderers.length} | Particles/renderer: ${perRenderer.toLocaleString()} | Crashes: ${STATE.crashCount}`;
+  }
 
-        // Debug info update
-        function updateDebugInfo() {
-            const debug = document.getElementById('debug');
-            debug.innerHTML = `
-                FPS: ${ANDROID_DESTROYER.lastFPS} | 
-                Renderers: ${ANDROID_DESTROYER.renderers.length} | 
-                Particles per renderer: ${ANDROID_DESTROYER.renderers.length > 0 ? ANDROID_DESTROYER.renderers[0].particleCount : 0} | 
-                Crashes: ${ANDROID_DESTROYER.crashCount}
-            `;
+  // Create renderers and scenes
+  function createRenderers() {
+    for(let i=0; i<CONFIG.WEBGL_CONTEXTS; i++) {
+      try {
+        const renderer = new THREE.WebGLRenderer({
+          antialias: i%2===0,
+          alpha: i%3===0,
+          preserveDrawingBuffer: true,
+        });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.autoClear = false;
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 5000);
+        camera.position.z = 500;
+
+        // Initial particles per renderer
+        const initialCount = Math.floor(CONFIG.INITIAL_PARTICLES_TOTAL / CONFIG.WEBGL_CONTEXTS);
+        const geometry = new THREE.BufferGeometry();
+        let positions = new Float32Array(initialCount * 3);
+        for(let j=0; j<initialCount*3; j+=3) {
+          positions[j] = (Math.random()-0.5)*2000;
+          positions[j+1] = (Math.random()-0.5)*2000;
+          positions[j+2] = (Math.random()-0.5)*2000;
+        }
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const material = new THREE.PointsMaterial({
+          size: 2,
+          color: new THREE.Color(Math.random(), Math.random(), Math.random()),
+          transparent: true,
+          opacity: 0.7,
+          blending: THREE.AdditiveBlending,
+          sizeAttenuation: true,
+        });
+
+        const particles = new THREE.Points(geometry, material);
+        scene.add(particles);
+
+        // Simple meshes to add load
+        const meshes = [];
+        for(let k=0; k<CONFIG.MESH_COUNT/CONFIG.WEBGL_CONTEXTS; k++) {
+          const size = 10 + Math.random()*20;
+          const geo = new THREE.IcosahedronGeometry(size, CONFIG.GEOMETRY_COMPLEXITY);
+          const mat = new THREE.MeshPhongMaterial({
+            color: new THREE.Color(Math.random(), Math.random(), Math.random()),
+            wireframe: k%2===0,
+            emissive: new THREE.Color(Math.random(), Math.random(), Math.random()),
+            shininess: 50,
+          });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.position.set(
+            (Math.random()-0.5)*1500,
+            (Math.random()-0.5)*1500,
+            (Math.random()-0.5)*1500
+          );
+          scene.add(mesh);
+          meshes.push(mesh);
         }
 
-        // Create multiple WebGL renderers with scenes
-        function createMultipleRenderers() {
-            for (let i = 0; i < ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS; i++) {
-                try {
-                    const renderer = new THREE.WebGLRenderer({
-                        antialias: i % 2 === 0,
-                        alpha: i % 3 === 0,
-                        preserveDrawingBuffer: true,
-                    });
-                    renderer.setPixelRatio(window.devicePixelRatio);
-                    renderer.setSize(window.innerWidth, window.innerHeight);
-                    renderer.autoClear = false;
-                    document.body.appendChild(renderer.domElement);
-
-                    const scene = new THREE.Scene();
-                    const camera = new THREE.PerspectiveCamera(
-                        75, window.innerWidth / window.innerHeight, 0.1, 5000
-                    );
-                    camera.position.z = 500;
-
-                    // Initial particles
-                    const initialCount = Math.floor(ANDROID_KILLER_CONFIG.INITIAL_PARTICLE_COUNT / ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS);
-                    const geometry = new THREE.BufferGeometry();
-                    let positions = new Float32Array(initialCount * 3);
-                    for (let j = 0; j < initialCount * 3; j += 3) {
-                        positions[j] = (Math.random() - 0.5) * 2000;
-                        positions[j + 1] = (Math.random() - 0.5) * 2000;
-                        positions[j + 2] = (Math.random() - 0.5) * 2000;
-                    }
-                    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-                    const material = new THREE.PointsMaterial({
-                        size: 2,
-                        color: new THREE.Color(Math.random(), Math.random(), Math.random()),
-                        transparent: true,
-                        opacity: 0.7,
-                        blending: THREE.AdditiveBlending,
-                        sizeAttenuation: true,
-                    });
-
-                    const particles = new THREE.Points(geometry, material);
-                    scene.add(particles);
-
-                    // Meshes
-                    const meshes = [];
-                    for (let k = 0; k < ANDROID_KILLER_CONFIG.MESH_COUNT / ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS; k++) {
-                        const size = 10 + Math.random() * 20;
-                        const geo = new THREE.IcosahedronGeometry(size, ANDROID_KILLER_CONFIG.GEOMETRY_COMPLEXITY);
-                        const mat = new THREE.MeshPhongMaterial({
-                            color: new THREE.Color(Math.random(), Math.random(), Math.random()),
-                            wireframe: k % 2 === 0,
-                            emissive: new THREE.Color(Math.random(), Math.random(), Math.random()),
-                            shininess: 50,
-                        });
-                        const mesh = new THREE.Mesh(geo, mat);
-                        mesh.position.set(
-                            (Math.random() - 0.5) * 1500,
-                            (Math.random() - 0.5) * 1500,
-                            (Math.random() - 0.5) * 1500
-                        );
-                        scene.add(mesh);
-                        meshes.push(mesh);
-                    }
-
-                    // Lights
-                    const lights = [];
-                    for (let l = 0; l < 3; l++) {
-                        const light = new THREE.PointLight(
-                            new THREE.Color(Math.random(), Math.random(), Math.random()),
-                            1,
-                            1000
-                        );
-                        light.position.set(
-                            (Math.random() - 0.5) * 1000,
-                            (Math.random() - 0.5) * 1000,
-                            (Math.random() - 0.5) * 1000
-                        );
-                        scene.add(light);
-                        lights.push(light);
-                    }
-
-                    ANDROID_DESTROYER.renderers.push({
-                        renderer,
-                        scene,
-                        camera,
-                        particles,
-                        geometry,
-                        meshes,
-                        lights,
-                        particleCount: initialCount,
-                    });
-
-                    // Handle context lost
-                    renderer.domElement.addEventListener('webglcontextlost', (e) => {
-                        e.preventDefault();
-                        ANDROID_DESTROYER.crashCount++;
-                        console.warn('WebGL context lost, attempting to recover...');
-                        setTimeout(() => {
-                            document.body.removeChild(renderer.domElement);
-                            ANDROID_DESTROYER.renderers = ANDROID_DESTROYER.renderers.filter(r => r.renderer !== renderer);
-                            createMultipleRenderers();
-                        }, 1000);
-                    }, false);
-
-                } catch (e) {
-                    console.error('Renderer creation failed:', e);
-                }
-            }
+        // Lights
+        const lights = [];
+        for(let l=0; l<3; l++) {
+          const light = new THREE.PointLight(
+            new THREE.Color(Math.random(), Math.random(), Math.random()),
+            1,
+            1000
+          );
+          light.position.set(
+            (Math.random()-0.5)*1000,
+            (Math.random()-0.5)*1000,
+            (Math.random()-0.5)*1000
+          );
+          scene.add(light);
+          lights.push(light);
         }
 
-        // Add more particles dynamically
-        function addParticles() {
-            ANDROID_DESTROYER.renderers.forEach(r => {
-                const oldCount = r.particleCount;
-                const addCount = ANDROID_KILLER_CONFIG.PARTICLES_TO_ADD_PER_SEC;
-                const newCount = oldCount + addCount;
+        STATE.renderers.push({
+          renderer,
+          scene,
+          camera,
+          particles,
+          geometry,
+          meshes,
+          lights,
+          particleCount: initialCount,
+        });
 
-                // Create new Float32Array with bigger size
-                const oldPositions = r.geometry.attributes.position.array;
-                const newPositions = new Float32Array(newCount * 3);
+        renderer.domElement.addEventListener('webglcontextlost', e => {
+          e.preventDefault();
+          STATE.crashCount++;
+          console.warn('WebGL context lost, recovering...');
+          setTimeout(() => {
+            document.body.removeChild(renderer.domElement);
+            STATE.renderers = STATE.renderers.filter(r => r.renderer !== renderer);
+            createRenderers();
+          }, 1000);
+        }, false);
 
-                // Copy old positions
-                newPositions.set(oldPositions);
+      } catch(e) {
+        console.error('Renderer creation failed:', e);
+      }
+    }
+  }
 
-                // Add new random positions
-                for (let i = oldCount * 3; i < newCount * 3; i += 3) {
-                    newPositions[i] = (Math.random() - 0.5) * 2000;
-                    newPositions[i + 1] = (Math.random() - 0.5) * 2000;
-                    newPositions[i + 2] = (Math.random() - 0.5) * 2000;
-                }
+  // Add particles dynamically with cap
+  function addParticles() {
+    STATE.renderers.forEach(r => {
+      if(r.particleCount >= CONFIG.MAX_PARTICLES_PER_RENDERER) return;
 
-                // Update geometry attribute
-                r.geometry.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
-                r.geometry.attributes.position.needsUpdate = true;
-                r.particleCount = newCount;
-            });
-        }
+      const addCount = Math.min(CONFIG.PARTICLES_ADD_PER_SEC, CONFIG.MAX_PARTICLES_PER_RENDERER - r.particleCount);
+      const oldCount = r.particleCount;
+      const newCount = oldCount + addCount;
 
-        // Animation loop
-        function animate() {
-            requestAnimationFrame(animate);
+      const oldPositions = r.geometry.attributes.position.array;
+      const newPositions = new Float32Array(newCount * 3);
+      newPositions.set(oldPositions);
 
-            const now = performance.now();
-            ANDROID_DESTROYER.lastFPS = Math.round(1000 / (now - ANDROID_DESTROYER._lastFrameTime));
-            ANDROID_DESTROYER._lastFrameTime = now;
+      for(let i=oldCount*3; i<newCount*3; i+=3) {
+        newPositions[i] = (Math.random()-0.5)*2000;
+        newPositions[i+1] = (Math.random()-0.5)*2000;
+        newPositions[i+2] = (Math.random()-0.5)*2000;
+      }
 
-            ANDROID_DESTROYER.renderers.forEach(({renderer, scene, camera, particles, geometry, meshes, lights}) => {
-                // Animate particle positions with jitter
-                const positions = geometry.attributes.position.array;
-                for (let i = 0; i < positions.length; i += 3) {
-                    positions[i] += (Math.random() - 0.5) * 0.3;
-                    positions[i + 1] += (Math.random() - 0.5) * 0.3;
-                    positions[i + 2] += (Math.random() - 0.5) * 0.3;
-                }
-                geometry.attributes.position.needsUpdate = true;
+      r.geometry.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
+      r.geometry.attributes.position.needsUpdate = true;
+      r.particleCount = newCount;
+    });
+  }
 
-                // Rotate meshes
-                meshes.forEach(mesh => {
-                    mesh.rotation.x += 0.01;
-                    mesh.rotation.y += 0.01;
-                    mesh.rotation.z += 0.01;
-                });
+  // Animation loop
+  function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    STATE.lastFPS = Math.round(1000/(now - STATE.lastFrameTime));
+    STATE.lastFrameTime = now;
 
-                // Animate lights in a circular path
-                lights.forEach((light, idx) => {
-                    const t = now * 0.001 + idx * 2;
-                    light.position.x = Math.sin(t) * 400;
-                    light.position.z = Math.cos(t) * 400;
-                });
+    STATE.renderers.forEach(({renderer, scene, camera, geometry, meshes, lights}) => {
+      const positions = geometry.attributes.position.array;
+      for(let i=0; i<positions.length; i+=3) {
+        positions[i] += (Math.random()-0.5)*0.3;
+        positions[i+1] += (Math.random()-0.5)*0.3;
+        positions[i+2] += (Math.random()-0.5)*0.3;
+      }
+      geometry.attributes.position.needsUpdate = true;
 
-                renderer.clear();
-                renderer.render(scene, camera);
-            });
-        }
+      meshes.forEach(mesh => {
+        mesh.rotation.x += 0.01;
+        mesh.rotation.y += 0.01;
+        mesh.rotation.z += 0.01;
+      });
 
-        // Start everything
-        document.getElementById('counters').innerText = 'SYSTEM OVERLOAD IN PROGRESS...';
-        createMultipleRenderers();
-        animate();
-        setInterval(updateDebugInfo, 1000);
+      lights.forEach((light, idx) => {
+        const t = now*0.001 + idx*2;
+        light.position.x = Math.sin(t)*400;
+        light.position.z = Math.cos(t)*400;
+      });
 
-        // Add particles every second
-        setInterval(addParticles, 1000);
-    </script>
+      renderer.clear();
+      renderer.render(scene, camera);
+    });
+  }
+
+  // Initialize
+  document.getElementById('counters').innerText = 'SYSTEM OVERLOAD IN PROGRESS...';
+  createRenderers();
+  animate();
+  setInterval(updateDebug, 1000);
+  setInterval(addParticles, 1000);
+</script>
 </body>
 </html>
