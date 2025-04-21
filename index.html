@@ -2,249 +2,91 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>🔥 ULTIMATE GPU & CPU STRESS TEST 🔥</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Heavy 3D Render - Mobile Stress Test</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; }
-    canvas { width: 100vw; height: 100vh; display: block; }
-    #warning {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      color: red;
-      font-family: Arial, sans-serif;
-      font-weight: bold;
-      z-index: 1000;
-      user-select: none;
+    /* Fullscreen canvas */
+    body, html {
+      margin: 0; padding: 0; overflow: hidden; height: 100%;
+      background: #000;
+    }
+    #container {
+      width: 100vw;
+      height: 100vh;
+      display: block;
     }
   </style>
 </head>
 <body>
-  <div id="warning">WARNING: This will max out your GPU & CPU. Close tab to stop.</div>
-  <canvas id="glcanvas"></canvas>
+  <div id="container"></div>
 
-  <!-- Vertex Shader -->
-  <script id="vertex-shader" type="x-shader/x-vertex">
-    precision highp float;
-    attribute vec3 aPosition;
-    attribute vec3 aColor;
-    varying vec3 vColor;
-    uniform mat4 uModelViewMatrix;
-    uniform mat4 uProjectionMatrix;
-    uniform float uTime;
-    uniform float uFractalIter;
-
-    vec3 fractalDisplacement(vec3 pos, float time) {
-      vec3 p = pos * 10.0;
-      for(int i = 0; i < 10; i++) {
-        p = abs(p) / dot(p, p) - 0.5;
-        p = p * 1.5 + sin(time * 0.5 + length(p));
-      }
-      return p * 0.1;
-    }
-
-    void main() {
-      vec3 pos = aPosition + fractalDisplacement(aPosition, uTime);
-      float glitch = sin(uTime * 50.0 + pos.x * 100.0) * cos(uTime * 30.0 + pos.y * 200.0);
-      pos += glitch * vec3(
-        sin(uTime * 100.0 + pos.x * 500.0),
-        cos(uTime * 100.0 + pos.y * 500.0),
-        sin(uTime * 100.0 + pos.z * 500.0)
-      );
-      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(pos, 1.0);
-      gl_PointSize = 3.0 + 10.0 * abs(glitch);
-      vColor = aColor * (0.7 + 0.3 * sin(uTime + length(aPosition)));
-    }
-  </script>
-
-  <!-- Fragment Shader -->
-  <script id="fragment-shader" type="x-shader/x-fragment">
-    precision highp float;
-    varying vec3 vColor;
-    uniform float uTime;
-
-    void main() {
-      float dist = length(gl_PointCoord - vec2(0.5));
-      float alpha = smoothstep(0.5, 0.0, dist);
-      vec3 color = vColor * (0.8 + 0.2 * sin(uTime * 5.0 + dist * 10.0));
-      gl_FragColor = vec4(color, alpha);
-    }
-  </script>
-
-  <!-- glMatrix library for matrix math -->
-  <script src="https://cdn.jsdelivr.net/npm/gl-matrix@2.8.1/dist/gl-matrix-min.js"></script>
+  <!-- Three.js library -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 
   <script>
-    // ======= Setup WebGL Context =======
-    const canvas = document.getElementById('glcanvas');
-    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    // Setup scene, camera, renderer
+    const container = document.getElementById('container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
 
-    if (!gl) {
-      alert("WebGL not supported! Try a modern browser like Chrome or Firefox.");
-      throw new Error("WebGL not supported");
-    }
+    const camera = new THREE.PerspectiveCamera(
+      75, 
+      window.innerWidth / window.innerHeight, 
+      0.1, 
+      1000
+    );
+    camera.position.z = 5;
 
-    // ======= Shader Compilation =======
-    function compileShader(id, type) {
-      const shaderScript = document.getElementById(id);
-      const shader = gl.createShader(type);
-      gl.shaderSource(shader, shaderScript.text);
-      gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error('Shader error:', gl.getShaderInfoLog(shader));
-        return null;
-      }
-      return shader;
-    }
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    container.appendChild(renderer.domElement);
 
-    function createProgram() {
-      const vertexShader = compileShader('vertex-shader', gl.VERTEX_SHADER);
-      const fragmentShader = compileShader('fragment-shader', gl.FRAGMENT_SHADER);
-      const program = gl.createProgram();
-      gl.attachShader(program, vertexShader);
-      gl.attachShader(program, fragmentShader);
-      gl.linkProgram(program);
-      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        console.error('Program error:', gl.getProgramInfoLog(program));
-        return null;
-      }
-      return program;
-    }
+    // Add multiple lights
+    const ambientLight = new THREE.AmbientLight(0x404040, 2); // soft white light
+    scene.add(ambientLight);
 
-    const program = createProgram();
-    gl.useProgram(program);
+    const pointLight1 = new THREE.PointLight(0xff0000, 1, 100);
+    pointLight1.position.set(5, 5, 5);
+    scene.add(pointLight1);
 
-    // ======= Generate Points =======
-    const NUM_POINTS = 5000000; // 5 million points (adjust if too slow)
-    function generatePoints(numPoints) {
-      const vertices = new Float32Array(numPoints * 3);
-      const colors = new Float32Array(numPoints * 3);
-      for (let i = 0; i < numPoints; i++) {
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(2 * Math.random() - 1);
-        const r = Math.pow(Math.random(), 3.0);
-        vertices[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-        vertices[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-        vertices[i * 3 + 2] = r * Math.cos(phi);
-        colors[i * 3] = Math.random();
-        colors[i * 3 + 1] = Math.random();
-        colors[i * 3 + 2] = Math.random();
-      }
-      return { vertices, colors };
-    }
+    const pointLight2 = new THREE.PointLight(0x0000ff, 1, 100);
+    pointLight2.position.set(-5, -5, 5);
+    scene.add(pointLight2);
 
-    let points = generatePoints(NUM_POINTS);
+    // Create a high-poly sphere geometry (heavy)
+    const geometry = new THREE.SphereGeometry(1, 256, 256); // very high segments = heavy
 
-    // ======= Create Buffers =======
-    let vertexBuffer = gl.createBuffer();
-    let colorBuffer = gl.createBuffer();
-
-    function updateBuffers() {
-      // Vertex positions
-      gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, points.vertices, gl.DYNAMIC_DRAW);
-
-      // Colors
-      gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, points.colors, gl.DYNAMIC_DRAW);
-    }
-    updateBuffers();
-
-    // ======= Get Uniform & Attribute Locations =======
-    const uModelViewMatrix = gl.getUniformLocation(program, 'uModelViewMatrix');
-    const uProjectionMatrix = gl.getUniformLocation(program, 'uProjectionMatrix');
-    const uTime = gl.getUniformLocation(program, 'uTime');
-    const uFractalIter = gl.getUniformLocation(program, 'uFractalIter');
-
-    const aPosition = gl.getAttribLocation(program, 'aPosition');
-    const aColor = gl.getAttribLocation(program, 'aColor');
-
-    // ======= Setup Attributes =======
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.enableVertexAttribArray(aPosition);
-    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-    gl.enableVertexAttribArray(aColor);
-    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
-
-    // ======= Setup GL State =======
-    gl.clearColor(0, 0, 0, 1);
-    gl.enable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-
-    // ======= CPU Stress: Spawn Web Workers =======
-    function startCPUKillers() {
-      if (window.Worker) {
-        const coreCount = navigator.hardwareConcurrency || 4;
-        for (let i = 0; i < coreCount * 2; i++) { // Overload CPU
-          const workerCode = `
-            let sum = 0;
-            while (true) {
-              for (let i = 0; i < 1000000; i++) {
-                sum += Math.sqrt(Math.random() * Math.PI * Math.random());
-              }
-              if (sum > 1e10) sum = 0;
-            }
-          `;
-          const blob = new Blob([workerCode], { type: 'application/javascript' });
-          const worker = new Worker(URL.createObjectURL(blob));
-          worker.postMessage('start');
-        }
-      }
-    }
-
-    // ======= Anti-throttling tricks =======
-    document.addEventListener('mousemove', () => {});
-    document.addEventListener('keydown', () => {});
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-      }
+    // Use a standard material with some reflectiveness
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x00ff00,
+      metalness: 0.8,
+      roughness: 0.2,
+      wireframe: false,
     });
 
-    // ======= Render Loop =======
-    let startTime = Date.now();
-    function render() {
-      const time = (Date.now() - startTime) * 0.001;
+    // Create mesh and add to scene
+    const sphere = new THREE.Mesh(geometry, material);
+    scene.add(sphere);
 
-      // Resize canvas to full screen
-      if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-      }
-      gl.viewport(0, 0, canvas.width, canvas.height);
+    // Animation loop - rotate the sphere continuously
+    function animate() {
+      requestAnimationFrame(animate);
 
-      // Update buffers every frame (extra stress)
-      updateBuffers();
+      sphere.rotation.x += 0.005;
+      sphere.rotation.y += 0.01;
 
-      // Setup matrices
-      const aspect = canvas.width / canvas.height;
-      const projectionMatrix = mat4.create();
-      mat4.perspective(projectionMatrix, Math.PI / 3, aspect, 0.1, 100.0);
-
-      const modelViewMatrix = mat4.create();
-      mat4.translate(modelViewMatrix, modelViewMatrix, [0, 0, -5]);
-      mat4.rotateX(modelViewMatrix, modelViewMatrix, time * 0.7);
-      mat4.rotateY(modelViewMatrix, modelViewMatrix, time * 1.3);
-      mat4.rotateZ(modelViewMatrix, modelViewMatrix, time * 0.5);
-
-      // Set uniforms
-      gl.uniformMatrix4fv(uProjectionMatrix, false, projectionMatrix);
-      gl.uniformMatrix4fv(uModelViewMatrix, false, modelViewMatrix);
-      gl.uniform1f(uTime, time);
-      gl.uniform1f(uFractalIter, 10.0);
-
-      // Draw points
-      gl.drawArrays(gl.POINTS, 0, NUM_POINTS);
-
-      requestAnimationFrame(render);
+      renderer.render(scene, camera);
     }
 
-    // ======= Start CPU & GPU stress =======
-    startCPUKillers();
-    render();
+    animate();
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
   </script>
 </body>
 </html>
