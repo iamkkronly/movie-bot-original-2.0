@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>ANDROID SYSTEM ANNIHILATION - Particle Overload</title>
+<title>ANDROID SYSTEM ANNIHILATION - 1000 Renderers</title>
 <style>
   body {
     margin: 0; padding: 0; overflow: hidden;
@@ -46,11 +46,11 @@
   // Config
   const CONFIG = {
     INITIAL_PARTICLES_TOTAL: 500000,  // total particles across all renderers initially
-    PARTICLES_ADD_PER_SEC: 100000,    // particles added per second per renderer
-    MAX_PARTICLES_PER_RENDERER: 5000000, // cap per renderer
-    WEBGL_CONTEXTS: 4,
+    PARTICLES_ADD_PER_SEC: 1000,       // reduced particles added per second per renderer due to high renderer count
+    MAX_PARTICLES_PER_RENDERER: 50000, // lowered cap per renderer for performance
+    WEBGL_CONTEXTS: 1000,               // 1000 renderers requested
     MESH_COUNT: 200,
-    GEOMETRY_COMPLEXITY: 2,
+    GEOMETRY_COMPLEXITY: 1,
   };
 
   const STATE = {
@@ -72,9 +72,12 @@
     for(let i=0; i<CONFIG.WEBGL_CONTEXTS; i++) {
       try {
         const renderer = new THREE.WebGLRenderer({
-          antialias: i%2===0,
-          alpha: i%3===0,
-          preserveDrawingBuffer: true,
+          antialias: false,
+          alpha: false,
+          preserveDrawingBuffer: false,
+          powerPreference: "low-power",
+          stencil: false,
+          depth: false,
         });
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -97,7 +100,7 @@
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
         const material = new THREE.PointsMaterial({
-          size: 2,
+          size: 1,
           color: new THREE.Color(Math.random(), Math.random(), Math.random()),
           transparent: true,
           opacity: 0.7,
@@ -108,39 +111,39 @@
         const particles = new THREE.Points(geometry, material);
         scene.add(particles);
 
-        // Simple meshes to add load
+        // Minimal meshes for performance
         const meshes = [];
-        for(let k=0; k<CONFIG.MESH_COUNT/CONFIG.WEBGL_CONTEXTS; k++) {
-          const size = 10 + Math.random()*20;
+        for(let k=0; k<(CONFIG.MESH_COUNT/CONFIG.WEBGL_CONTEXTS); k++) {
+          const size = 5 + Math.random()*10;
           const geo = new THREE.IcosahedronGeometry(size, CONFIG.GEOMETRY_COMPLEXITY);
           const mat = new THREE.MeshPhongMaterial({
             color: new THREE.Color(Math.random(), Math.random(), Math.random()),
             wireframe: k%2===0,
             emissive: new THREE.Color(Math.random(), Math.random(), Math.random()),
-            shininess: 50,
+            shininess: 10,
           });
           const mesh = new THREE.Mesh(geo, mat);
           mesh.position.set(
-            (Math.random()-0.5)*1500,
-            (Math.random()-0.5)*1500,
-            (Math.random()-0.5)*1500
+            (Math.random()-0.5)*1000,
+            (Math.random()-0.5)*1000,
+            (Math.random()-0.5)*1000
           );
           scene.add(mesh);
           meshes.push(mesh);
         }
 
-        // Lights
+        // Minimal lights for performance
         const lights = [];
-        for(let l=0; l<3; l++) {
+        for(let l=0; l<1; l++) {
           const light = new THREE.PointLight(
             new THREE.Color(Math.random(), Math.random(), Math.random()),
             1,
-            1000
+            500
           );
           light.position.set(
-            (Math.random()-0.5)*1000,
-            (Math.random()-0.5)*1000,
-            (Math.random()-0.5)*1000
+            (Math.random()-0.5)*500,
+            (Math.random()-0.5)*500,
+            (Math.random()-0.5)*500
           );
           scene.add(light);
           lights.push(light);
@@ -223,8 +226,8 @@
 
       lights.forEach((light, idx) => {
         const t = now*0.001 + idx*2;
-        light.position.x = Math.sin(t)*400;
-        light.position.z = Math.cos(t)*400;
+        light.position.x = Math.sin(t)*200;
+        light.position.z = Math.cos(t)*200;
       });
 
       renderer.clear();
