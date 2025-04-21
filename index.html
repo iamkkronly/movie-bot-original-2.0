@@ -3,95 +3,93 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>3D Render + IP & Location Detector</title>
+  <title>3D Globe with Location Marker</title>
   <style>
-    body, html { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; color: #fff; }
-    #container { width: 100vw; height: 60vh; display: block; }
-    #info { padding: 20px; background: rgba(0,0,0,0.8); position: absolute; top: 0; left: 0; z-index: 10; }
-    .label { font-weight: bold; }
+    body { margin: 0; background: #000; color: #fff; }
+    #info { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 6px; }
+    #globe { display: block; width: 100vw; height: 100vh; }
   </style>
 </head>
 <body>
   <div id="info">
-    <div><span class="label">IP Address:</span> <span id="ip">Detecting...</span></div>
-    <div><span class="label">IP Version:</span> <span id="ipver">Detecting...</span></div>
-    <div><span class="label">Location:</span> <span id="loc">Detecting...</span></div>
+    <div><b>IP:</b> <span id="ip">Detecting...</span></div>
+    <div><b>Location:</b> <span id="loc">Detecting...</span></div>
   </div>
-  <div id="container"></div>
-
-  <!-- Three.js CDN -->
+  <canvas id="globe"></canvas>
   <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
-
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/controls/OrbitControls.js"></script>
   <script>
-    // 3D Render (heavy)
-    const container = document.getElementById('container');
+    // Globe setup
+    const canvas = document.getElementById('globe');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.z = 3;
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / (window.innerHeight*0.6), 0.1, 1000);
-    camera.position.z = 5;
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight * 0.6);
-    container.appendChild(renderer.domElement);
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(5, 3, 5);
+    scene.add(dirLight);
 
-    const ambientLight = new THREE.AmbientLight(0x404040, 2);
-    scene.add(ambientLight);
+    // Earth sphere
+    const geometry = new THREE.SphereGeometry(1, 64, 64);
+    const texture = new THREE.TextureLoader().load('https://upload.wikimedia.org/wikipedia/commons/9/97/The_Earth_seen_from_Apollo_17.jpg');
+    const material = new THREE.MeshPhongMaterial({ map: texture });
+    const earth = new THREE.Mesh(geometry, material);
+    scene.add(earth);
 
-    const pointLight1 = new THREE.PointLight(0xff0000, 1, 100);
-    pointLight1.position.set(5, 5, 5);
-    scene.add(pointLight1);
+    // Marker
+    const markerGeometry = new THREE.SphereGeometry(0.03, 16, 16);
+    const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+    scene.add(marker);
 
-    const pointLight2 = new THREE.PointLight(0x0000ff, 1, 100);
-    pointLight2.position.set(-5, -5, 5);
-    scene.add(pointLight2);
+    // Convert lat/lon to 3D position on sphere
+    function latLonToVector3(lat, lon, radius = 1.01) {
+      const phi = (90 - lat) * (Math.PI / 180);
+      const theta = (lon + 180) * (Math.PI / 180);
+      return new THREE.Vector3(
+        -radius * Math.sin(phi) * Math.cos(theta),
+         radius * Math.cos(phi),
+         radius * Math.sin(phi) * Math.sin(theta)
+      );
+    }
 
-    const geometry = new THREE.SphereGeometry(1, 256, 256);
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x00ff00,
-      metalness: 0.8,
-      roughness: 0.2
-    });
-    const sphere = new THREE.Mesh(geometry, material);
-    scene.add(sphere);
-
+    // Animate
     function animate() {
-      requestAnimationFrame(animate);
-      sphere.rotation.x += 0.005;
-      sphere.rotation.y += 0.01;
+      controls.update();
       renderer.render(scene, camera);
+      requestAnimationFrame(animate);
     }
     animate();
 
+    // Resize handling
     window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / (window.innerHeight*0.6);
+      camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight * 0.6);
+      renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // IP & Location Detection
-    async function detectIPAndLocation() {
-      try {
-        // Use a public API to get IP and location
-        const res = await fetch('https://ipapi.co/json/');
-        const data = await res.json();
+    // Detect IP and location, then update marker
+    fetch('https://ipapi.co/json/')
+      .then(res => res.json())
+      .then(data => {
         document.getElementById('ip').textContent = data.ip;
-        document.getElementById('loc').textContent = 
-          `${data.city}, ${data.region}, ${data.country_name}`;
-
-        // Detect IPv4 or IPv6
-        const ip = data.ip;
-        let ipver = 'Unknown';
-        if (/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) ipver = 'IPv4';
-        else if (/^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/.test(ip)) ipver = 'IPv6';
-        document.getElementById('ipver').textContent = ipver;
-      } catch (e) {
+        document.getElementById('loc').textContent = `${data.city}, ${data.country_name} (${data.latitude}, ${data.longitude})`;
+        // Place marker
+        const pos = latLonToVector3(data.latitude, data.longitude);
+        marker.position.copy(pos);
+      })
+      .catch(() => {
         document.getElementById('ip').textContent = 'Error';
-        document.getElementById('ipver').textContent = 'Error';
         document.getElementById('loc').textContent = 'Error';
-      }
-    }
-    detectIPAndLocation();
+      });
   </script>
 </body>
 </html>
