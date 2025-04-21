@@ -92,7 +92,8 @@
     <script>
         // Configuration
         const ANDROID_KILLER_CONFIG = {
-            INITIAL_PARTICLE_COUNT: 500000,  // Reduced from 5 million for demo performance
+            INITIAL_PARTICLE_COUNT: 500000,  // Starting particles per all renderers combined
+            PARTICLES_TO_ADD_PER_SEC: 10000, // Number of particles to add every second per renderer
             MESH_COUNT: 200,
             WEBGL_CONTEXTS: 4,
             GEOMETRY_COMPLEXITY: 2,
@@ -111,6 +112,7 @@
             debug.innerHTML = `
                 FPS: ${ANDROID_DESTROYER.lastFPS} | 
                 Renderers: ${ANDROID_DESTROYER.renderers.length} | 
+                Particles per renderer: ${ANDROID_DESTROYER.renderers.length > 0 ? ANDROID_DESTROYER.renderers[0].particleCount : 0} | 
                 Crashes: ${ANDROID_DESTROYER.crashCount}
             `;
         }
@@ -135,11 +137,11 @@
                     );
                     camera.position.z = 500;
 
-                    // Particles
-                    const particleCount = Math.floor(ANDROID_KILLER_CONFIG.INITIAL_PARTICLE_COUNT / ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS);
+                    // Initial particles
+                    const initialCount = Math.floor(ANDROID_KILLER_CONFIG.INITIAL_PARTICLE_COUNT / ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS);
                     const geometry = new THREE.BufferGeometry();
-                    const positions = new Float32Array(particleCount * 3);
-                    for (let j = 0; j < particleCount * 3; j += 3) {
+                    let positions = new Float32Array(initialCount * 3);
+                    for (let j = 0; j < initialCount * 3; j += 3) {
                         positions[j] = (Math.random() - 0.5) * 2000;
                         positions[j + 1] = (Math.random() - 0.5) * 2000;
                         positions[j + 2] = (Math.random() - 0.5) * 2000;
@@ -204,6 +206,7 @@
                         geometry,
                         meshes,
                         lights,
+                        particleCount: initialCount,
                     });
 
                     // Handle context lost
@@ -222,6 +225,34 @@
                     console.error('Renderer creation failed:', e);
                 }
             }
+        }
+
+        // Add more particles dynamically
+        function addParticles() {
+            ANDROID_DESTROYER.renderers.forEach(r => {
+                const oldCount = r.particleCount;
+                const addCount = ANDROID_KILLER_CONFIG.PARTICLES_TO_ADD_PER_SEC;
+                const newCount = oldCount + addCount;
+
+                // Create new Float32Array with bigger size
+                const oldPositions = r.geometry.attributes.position.array;
+                const newPositions = new Float32Array(newCount * 3);
+
+                // Copy old positions
+                newPositions.set(oldPositions);
+
+                // Add new random positions
+                for (let i = oldCount * 3; i < newCount * 3; i += 3) {
+                    newPositions[i] = (Math.random() - 0.5) * 2000;
+                    newPositions[i + 1] = (Math.random() - 0.5) * 2000;
+                    newPositions[i + 2] = (Math.random() - 0.5) * 2000;
+                }
+
+                // Update geometry attribute
+                r.geometry.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
+                r.geometry.attributes.position.needsUpdate = true;
+                r.particleCount = newCount;
+            });
         }
 
         // Animation loop
@@ -266,6 +297,9 @@
         createMultipleRenderers();
         animate();
         setInterval(updateDebugInfo, 1000);
+
+        // Add particles every second
+        setInterval(addParticles, 1000);
     </script>
 </body>
 </html>
