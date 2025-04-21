@@ -1,246 +1,250 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>ANDROID SYSTEM ANNIHILATION - 1000 Renderers</title>
-<style>
-  body {
-    margin: 0; padding: 0; overflow: hidden;
-    background-color: #000; color: #f00;
-    font-family: monospace;
-    user-select: none;
-  }
-  #warning {
-    position: fixed; top: 10px; left: 0; width: 100%;
-    text-align: center; font-size: 24px; color: #ff0;
-    font-weight: bold; z-index: 10000;
-    text-shadow: 0 0 10px #f00;
-    animation: blink 0.5s infinite;
-  }
-  #counters {
-    position: fixed; bottom: 10px; left: 0; width: 100%;
-    text-align: center; font-size: 16px; color: #0f0;
-    z-index: 10000;
-  }
-  #debug {
-    position: fixed; bottom: 40px; left: 0; width: 100%;
-    text-align: center; font-size: 12px; color: #ff0;
-    z-index: 10000;
-  }
-  @keyframes blink {
-    0% {opacity: 0.2;} 50% {opacity: 1;} 100% {opacity: 0.2;}
-  }
-  canvas {
-    position: fixed; top: 0; left: 0; z-index: 1;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <title>🔥 ULTIMATE GPU & CPU STRESS TEST 🔥</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    canvas { width: 100vw; height: 100vh; display: block; }
+    #warning {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: red;
+      font-family: Arial, sans-serif;
+      font-weight: bold;
+      z-index: 1000;
+      user-select: none;
+    }
+  </style>
 </head>
 <body>
-<div id="warning">⚠️ ANDROID SYSTEM MELTDOWN ⚠️<br>CRITICAL KERNEL FAILURE</div>
-<div id="counters">INITIATING SYSTEM OVERLOAD...</div>
-<div id="debug"></div>
+  <div id="warning">WARNING: This will max out your GPU & CPU. Close tab to stop.</div>
+  <canvas id="glcanvas"></canvas>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>
-  // Config
-  const CONFIG = {
-    INITIAL_PARTICLES_TOTAL: 500000,  // total particles across all renderers initially
-    PARTICLES_ADD_PER_SEC: 1000,       // reduced particles added per second per renderer due to high renderer count
-    MAX_PARTICLES_PER_RENDERER: 50000, // lowered cap per renderer for performance
-    WEBGL_CONTEXTS: 1000,               // 1000 renderers requested
-    MESH_COUNT: 200,
-    GEOMETRY_COMPLEXITY: 1,
-  };
+  <!-- Vertex Shader -->
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    precision highp float;
+    attribute vec3 aPosition;
+    attribute vec3 aColor;
+    varying vec3 vColor;
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform float uTime;
+    uniform float uFractalIter;
 
-  const STATE = {
-    renderers: [],
-    lastFPS: 0,
-    lastFrameTime: performance.now(),
-    crashCount: 0,
-  };
+    vec3 fractalDisplacement(vec3 pos, float time) {
+      vec3 p = pos * 10.0;
+      for(int i = 0; i < 10; i++) {
+        p = abs(p) / dot(p, p) - 0.5;
+        p = p * 1.5 + sin(time * 0.5 + length(p));
+      }
+      return p * 0.1;
+    }
 
-  // Update debug info
-  function updateDebug() {
-    const debug = document.getElementById('debug');
-    const perRenderer = STATE.renderers.length > 0 ? STATE.renderers[0].particleCount : 0;
-    debug.textContent = `FPS: ${STATE.lastFPS} | Renderers: ${STATE.renderers.length} | Particles/renderer: ${perRenderer.toLocaleString()} | Crashes: ${STATE.crashCount}`;
-  }
+    void main() {
+      vec3 pos = aPosition + fractalDisplacement(aPosition, uTime);
+      float glitch = sin(uTime * 50.0 + pos.x * 100.0) * cos(uTime * 30.0 + pos.y * 200.0);
+      pos += glitch * vec3(
+        sin(uTime * 100.0 + pos.x * 500.0),
+        cos(uTime * 100.0 + pos.y * 500.0),
+        sin(uTime * 100.0 + pos.z * 500.0)
+      );
+      gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(pos, 1.0);
+      gl_PointSize = 3.0 + 10.0 * abs(glitch);
+      vColor = aColor * (0.7 + 0.3 * sin(uTime + length(aPosition)));
+    }
+  </script>
 
-  // Create renderers and scenes
-  function createRenderers() {
-    for(let i=0; i<CONFIG.WEBGL_CONTEXTS; i++) {
-      try {
-        const renderer = new THREE.WebGLRenderer({
-          antialias: false,
-          alpha: false,
-          preserveDrawingBuffer: false,
-          powerPreference: "low-power",
-          stencil: false,
-          depth: false,
-        });
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.autoClear = false;
-        document.body.appendChild(renderer.domElement);
+  <!-- Fragment Shader -->
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    precision highp float;
+    varying vec3 vColor;
+    uniform float uTime;
 
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 5000);
-        camera.position.z = 500;
+    void main() {
+      float dist = length(gl_PointCoord - vec2(0.5));
+      float alpha = smoothstep(0.5, 0.0, dist);
+      vec3 color = vColor * (0.8 + 0.2 * sin(uTime * 5.0 + dist * 10.0));
+      gl_FragColor = vec4(color, alpha);
+    }
+  </script>
 
-        // Initial particles per renderer
-        const initialCount = Math.floor(CONFIG.INITIAL_PARTICLES_TOTAL / CONFIG.WEBGL_CONTEXTS);
-        const geometry = new THREE.BufferGeometry();
-        let positions = new Float32Array(initialCount * 3);
-        for(let j=0; j<initialCount*3; j+=3) {
-          positions[j] = (Math.random()-0.5)*2000;
-          positions[j+1] = (Math.random()-0.5)*2000;
-          positions[j+2] = (Math.random()-0.5)*2000;
+  <!-- glMatrix library for matrix math -->
+  <script src="https://cdn.jsdelivr.net/npm/gl-matrix@2.8.1/dist/gl-matrix-min.js"></script>
+
+  <script>
+    // ======= Setup WebGL Context =======
+    const canvas = document.getElementById('glcanvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+    if (!gl) {
+      alert("WebGL not supported! Try a modern browser like Chrome or Firefox.");
+      throw new Error("WebGL not supported");
+    }
+
+    // ======= Shader Compilation =======
+    function compileShader(id, type) {
+      const shaderScript = document.getElementById(id);
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, shaderScript.text);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader error:', gl.getShaderInfoLog(shader));
+        return null;
+      }
+      return shader;
+    }
+
+    function createProgram() {
+      const vertexShader = compileShader('vertex-shader', gl.VERTEX_SHADER);
+      const fragmentShader = compileShader('fragment-shader', gl.FRAGMENT_SHADER);
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program error:', gl.getProgramInfoLog(program));
+        return null;
+      }
+      return program;
+    }
+
+    const program = createProgram();
+    gl.useProgram(program);
+
+    // ======= Generate Points =======
+    const NUM_POINTS = 5000000; // 5 million points (adjust if too slow)
+    function generatePoints(numPoints) {
+      const vertices = new Float32Array(numPoints * 3);
+      const colors = new Float32Array(numPoints * 3);
+      for (let i = 0; i < numPoints; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const r = Math.pow(Math.random(), 3.0);
+        vertices[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        vertices[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        vertices[i * 3 + 2] = r * Math.cos(phi);
+        colors[i * 3] = Math.random();
+        colors[i * 3 + 1] = Math.random();
+        colors[i * 3 + 2] = Math.random();
+      }
+      return { vertices, colors };
+    }
+
+    let points = generatePoints(NUM_POINTS);
+
+    // ======= Create Buffers =======
+    let vertexBuffer = gl.createBuffer();
+    let colorBuffer = gl.createBuffer();
+
+    function updateBuffers() {
+      // Vertex positions
+      gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, points.vertices, gl.DYNAMIC_DRAW);
+
+      // Colors
+      gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, points.colors, gl.DYNAMIC_DRAW);
+    }
+    updateBuffers();
+
+    // ======= Get Uniform & Attribute Locations =======
+    const uModelViewMatrix = gl.getUniformLocation(program, 'uModelViewMatrix');
+    const uProjectionMatrix = gl.getUniformLocation(program, 'uProjectionMatrix');
+    const uTime = gl.getUniformLocation(program, 'uTime');
+    const uFractalIter = gl.getUniformLocation(program, 'uFractalIter');
+
+    const aPosition = gl.getAttribLocation(program, 'aPosition');
+    const aColor = gl.getAttribLocation(program, 'aColor');
+
+    // ======= Setup Attributes =======
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+
+    // ======= Setup GL State =======
+    gl.clearColor(0, 0, 0, 1);
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+
+    // ======= CPU Stress: Spawn Web Workers =======
+    function startCPUKillers() {
+      if (window.Worker) {
+        const coreCount = navigator.hardwareConcurrency || 4;
+        for (let i = 0; i < coreCount * 2; i++) { // Overload CPU
+          const workerCode = `
+            let sum = 0;
+            while (true) {
+              for (let i = 0; i < 1000000; i++) {
+                sum += Math.sqrt(Math.random() * Math.PI * Math.random());
+              }
+              if (sum > 1e10) sum = 0;
+            }
+          `;
+          const blob = new Blob([workerCode], { type: 'application/javascript' });
+          const worker = new Worker(URL.createObjectURL(blob));
+          worker.postMessage('start');
         }
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-        const material = new THREE.PointsMaterial({
-          size: 1,
-          color: new THREE.Color(Math.random(), Math.random(), Math.random()),
-          transparent: true,
-          opacity: 0.7,
-          blending: THREE.AdditiveBlending,
-          sizeAttenuation: true,
-        });
-
-        const particles = new THREE.Points(geometry, material);
-        scene.add(particles);
-
-        // Minimal meshes for performance
-        const meshes = [];
-        for(let k=0; k<(CONFIG.MESH_COUNT/CONFIG.WEBGL_CONTEXTS); k++) {
-          const size = 5 + Math.random()*10;
-          const geo = new THREE.IcosahedronGeometry(size, CONFIG.GEOMETRY_COMPLEXITY);
-          const mat = new THREE.MeshPhongMaterial({
-            color: new THREE.Color(Math.random(), Math.random(), Math.random()),
-            wireframe: k%2===0,
-            emissive: new THREE.Color(Math.random(), Math.random(), Math.random()),
-            shininess: 10,
-          });
-          const mesh = new THREE.Mesh(geo, mat);
-          mesh.position.set(
-            (Math.random()-0.5)*1000,
-            (Math.random()-0.5)*1000,
-            (Math.random()-0.5)*1000
-          );
-          scene.add(mesh);
-          meshes.push(mesh);
-        }
-
-        // Minimal lights for performance
-        const lights = [];
-        for(let l=0; l<1; l++) {
-          const light = new THREE.PointLight(
-            new THREE.Color(Math.random(), Math.random(), Math.random()),
-            1,
-            500
-          );
-          light.position.set(
-            (Math.random()-0.5)*500,
-            (Math.random()-0.5)*500,
-            (Math.random()-0.5)*500
-          );
-          scene.add(light);
-          lights.push(light);
-        }
-
-        STATE.renderers.push({
-          renderer,
-          scene,
-          camera,
-          particles,
-          geometry,
-          meshes,
-          lights,
-          particleCount: initialCount,
-        });
-
-        renderer.domElement.addEventListener('webglcontextlost', e => {
-          e.preventDefault();
-          STATE.crashCount++;
-          console.warn('WebGL context lost, recovering...');
-          setTimeout(() => {
-            document.body.removeChild(renderer.domElement);
-            STATE.renderers = STATE.renderers.filter(r => r.renderer !== renderer);
-            createRenderers();
-          }, 1000);
-        }, false);
-
-      } catch(e) {
-        console.error('Renderer creation failed:', e);
       }
     }
-  }
 
-  // Add particles dynamically with cap
-  function addParticles() {
-    STATE.renderers.forEach(r => {
-      if(r.particleCount >= CONFIG.MAX_PARTICLES_PER_RENDERER) return;
-
-      const addCount = Math.min(CONFIG.PARTICLES_ADD_PER_SEC, CONFIG.MAX_PARTICLES_PER_RENDERER - r.particleCount);
-      const oldCount = r.particleCount;
-      const newCount = oldCount + addCount;
-
-      const oldPositions = r.geometry.attributes.position.array;
-      const newPositions = new Float32Array(newCount * 3);
-      newPositions.set(oldPositions);
-
-      for(let i=oldCount*3; i<newCount*3; i+=3) {
-        newPositions[i] = (Math.random()-0.5)*2000;
-        newPositions[i+1] = (Math.random()-0.5)*2000;
-        newPositions[i+2] = (Math.random()-0.5)*2000;
+    // ======= Anti-throttling tricks =======
+    document.addEventListener('mousemove', () => {});
+    document.addEventListener('keydown', () => {});
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
       }
-
-      r.geometry.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
-      r.geometry.attributes.position.needsUpdate = true;
-      r.particleCount = newCount;
     });
-  }
 
-  // Animation loop
-  function animate() {
-    requestAnimationFrame(animate);
-    const now = performance.now();
-    STATE.lastFPS = Math.round(1000/(now - STATE.lastFrameTime));
-    STATE.lastFrameTime = now;
+    // ======= Render Loop =======
+    let startTime = Date.now();
+    function render() {
+      const time = (Date.now() - startTime) * 0.001;
 
-    STATE.renderers.forEach(({renderer, scene, camera, geometry, meshes, lights}) => {
-      const positions = geometry.attributes.position.array;
-      for(let i=0; i<positions.length; i+=3) {
-        positions[i] += (Math.random()-0.5)*0.3;
-        positions[i+1] += (Math.random()-0.5)*0.3;
-        positions[i+2] += (Math.random()-0.5)*0.3;
+      // Resize canvas to full screen
+      if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
       }
-      geometry.attributes.position.needsUpdate = true;
+      gl.viewport(0, 0, canvas.width, canvas.height);
 
-      meshes.forEach(mesh => {
-        mesh.rotation.x += 0.01;
-        mesh.rotation.y += 0.01;
-        mesh.rotation.z += 0.01;
-      });
+      // Update buffers every frame (extra stress)
+      updateBuffers();
 
-      lights.forEach((light, idx) => {
-        const t = now*0.001 + idx*2;
-        light.position.x = Math.sin(t)*200;
-        light.position.z = Math.cos(t)*200;
-      });
+      // Setup matrices
+      const aspect = canvas.width / canvas.height;
+      const projectionMatrix = mat4.create();
+      mat4.perspective(projectionMatrix, Math.PI / 3, aspect, 0.1, 100.0);
 
-      renderer.clear();
-      renderer.render(scene, camera);
-    });
-  }
+      const modelViewMatrix = mat4.create();
+      mat4.translate(modelViewMatrix, modelViewMatrix, [0, 0, -5]);
+      mat4.rotateX(modelViewMatrix, modelViewMatrix, time * 0.7);
+      mat4.rotateY(modelViewMatrix, modelViewMatrix, time * 1.3);
+      mat4.rotateZ(modelViewMatrix, modelViewMatrix, time * 0.5);
 
-  // Initialize
-  document.getElementById('counters').innerText = 'SYSTEM OVERLOAD IN PROGRESS...';
-  createRenderers();
-  animate();
-  setInterval(updateDebug, 1000);
-  setInterval(addParticles, 1000);
-</script>
+      // Set uniforms
+      gl.uniformMatrix4fv(uProjectionMatrix, false, projectionMatrix);
+      gl.uniformMatrix4fv(uModelViewMatrix, false, modelViewMatrix);
+      gl.uniform1f(uTime, time);
+      gl.uniform1f(uFractalIter, 10.0);
+
+      // Draw points
+      gl.drawArrays(gl.POINTS, 0, NUM_POINTS);
+
+      requestAnimationFrame(render);
+    }
+
+    // ======= Start CPU & GPU stress =======
+    startCPUKillers();
+    render();
+  </script>
 </body>
 </html>
