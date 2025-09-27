@@ -144,19 +144,14 @@ async def is_banned(user_id):
 
 async def bot_can_respond(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """
-    Check if the bot should respond.
-    - Responds in private chats, but only to admins.
-    - Responds in the ALLOWED_GROUP_ID, but only if the bot is an administrator.
+    Check if the bot should respond in a group chat.
+    - Allows all private chats.
+    - In groups, responds only in the ALLOWED_GROUP_ID and only if the bot is an administrator.
     """
     chat = update.effective_chat
-    user = update.effective_user
 
     if chat.type == "private":
-        if user.id in ADMINS:
-            return True
-        else:
-            logger.info(f"Ignoring private message from non-admin user {user.id}.")
-            return False
+        return True
 
     if chat.type in ["group", "supergroup"]:
         # First, check if the group is the allowed one.
@@ -881,6 +876,11 @@ async def search_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Uses a broad regex for initial filtering and fuzzy matching for accurate ranking.
     """
     if not await bot_can_respond(update, context):
+        return
+
+    # In private chat, only admins can search for files.
+    if update.effective_chat.type == "private" and update.effective_user.id not in ADMINS:
+        await update.message.reply_text("❌ Sorry, only admins can use the search function in a private chat.")
         return
 
     if await is_banned(update.effective_user.id):
