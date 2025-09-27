@@ -27,6 +27,7 @@ import io
 BOT_TOKEN = "8410215954:AAE0icLhQeXs4aIU0pA_wrhMbOOziPQLx24"  # Bot Token
 DB_CHANNEL = -1002975831610  # Database channel
 LOG_CHANNEL = -1002988891392  # Channel to log user queries
+ALLOWED_GROUP_ID = -1001234567890  # The only group ID the bot will respond in
 # Channels users must join for access
 JOIN_CHECK_CHANNEL = [-1002692055617, -1002551875503, -1002839913869]
 ADMINS = [6705618257]        # Admin IDs
@@ -142,18 +143,28 @@ async def is_banned(user_id):
     return False
 
 async def bot_can_respond(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Check if the bot should respond in a group (only if admin) or in a private chat."""
+    """
+    Check if the bot should respond.
+    - Responds in private chats.
+    - Responds in the ALLOWED_GROUP_ID, but only if it's an administrator.
+    """
     chat = update.effective_chat
     if chat.type == "private":
         return True
 
     if chat.type in ["group", "supergroup"]:
+        # First, check if the group is the allowed one.
+        if chat.id != ALLOWED_GROUP_ID:
+            logger.info(f"Ignoring message from non-allowed group {chat.id}.")
+            return False
+
+        # If it's the correct group, then check for admin status.
         try:
             bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
             if bot_member.status == "administrator":
                 return True
             else:
-                logger.info(f"Bot is not an admin in group {chat.id}, ignoring message.")
+                logger.info(f"Bot is not an admin in the allowed group {chat.id}, ignoring message.")
                 return False
         except TelegramError as e:
             logger.error(f"Could not check bot status in group {chat.id}: {e}")
