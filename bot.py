@@ -173,6 +173,49 @@ async def bot_can_respond(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     return False
 
+async def send_and_delete_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    text: str,
+    reply_markup=None,
+    parse_mode=None,
+    reply_to_message_id=None
+):
+    """Sends a message and schedules its deletion after 5 minutes."""
+    try:
+        if reply_to_message_id:
+            sent_message = await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+                reply_to_message_id=reply_to_message_id
+            )
+        else:
+            sent_message = await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+
+        # Schedule deletion
+        deletion_task = asyncio.create_task(delete_message_after_delay(context, chat_id, sent_message.message_id, 5 * 60))
+        return sent_message, deletion_task
+    except TelegramError as e:
+        logger.error(f"Error in send_and_delete_message to chat {chat_id}: {e}")
+        return None, None
+
+async def delete_message_after_delay(context, chat_id, message_id, delay):
+    """Awaits a delay and then deletes a message."""
+    await asyncio.sleep(delay)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.info(f"Auto-deleted message {message_id} from chat {chat_id}.")
+    except TelegramError as e:
+        logger.warning(f"Failed to auto-delete message {message_id} from chat {chat_id}: {e}")
+
+
 def connect_to_mongo():
     """Connect to the MongoDB URI at the current index."""
     global mongo_client, db, files_col, users_col, banned_users_col
@@ -230,13 +273,14 @@ async def send_file_task(query, context, file_data):
         # If the message was sent successfully
         if sent_message:
             # Send the custom combined promotional message to the private chat (now simplified)
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=CUSTOM_PROMO_MESSAGE
+            await send_and_delete_message(
+                context,
+                user_id,
+                CUSTOM_PROMO_MESSAGE
             )
 
             # Notify the user in the original chat (can be group/private)
-            await query.message.reply_text("✅ I have sent the file to you in a private message. The file will be deleted automatically in 5 minutes.")
+            await send_and_delete_message(context, query.message.chat.id, "✅ I have sent the file to you in a private message. The file will be deleted automatically in 5 minutes.")
 
             # Wait for 5 minutes
             await asyncio.sleep(5 * 60)
@@ -251,10 +295,10 @@ async def send_file_task(query, context, file_data):
     except TelegramError as e:
         logger.error(f"Failed to send file to user {user_id}: {e}")
         # Only reply in the chat where the button was clicked (group/private)
-        await query.message.reply_text("❌ File not found or could not be sent. Please ensure the bot is not blocked in your private chat.")
+        await send_and_delete_message(context, query.message.chat.id, "❌ File not found or could not be sent. Please ensure the bot is not blocked in your private chat.")
     except Exception as e:
         logger.error(f"An unexpected error occurred while sending the file: {e}")
-        await query.message.reply_text("❌ An unexpected error occurred. Please try again later.")
+        await send_and_delete_message(context, query.message.chat.id, "❌ An unexpected error occurred. Please try again later.")
 
 
 async def send_all_files_task(query, context, file_list):
@@ -274,16 +318,19 @@ async def send_all_files_task(query, context, file_list):
             sent_messages.append(sent_message.message_id)
 
             # Send the custom promotional message to the user's private chat after each file (now simplified)
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=CUSTOM_PROMO_MESSAGE
+            await send_and_delete_message(
+                context,
+                user_id,
+                CUSTOM_PROMO_MESSAGE
             )
 
             # Add a small delay between sending files to avoid rate limits
             await asyncio.sleep(0.5)
 
         # Send final confirmation message to the chat where the button was clicked
-        await query.message.reply_text(
+        await send_and_delete_message(
+            context,
+            query.message.chat.id,
             "✅ I have sent all files to you in a private message. The files will be deleted automatically in 5 minutes."
         )
 
@@ -303,10 +350,10 @@ async def send_all_files_task(query, context, file_list):
 
     except TelegramError as e:
         logger.error(f"Failed to send one or more files to user {user_id}: {e}")
-        await query.message.reply_text("❌ One or more files could not be sent. Please ensure the bot is not blocked in your private chat.")
+        await send_and_delete_message(context, query.message.chat.id, "❌ One or more files could not be sent. Please ensure the bot is not blocked in your private chat.")
     except Exception as e:
         logger.error(f"An unexpected error occurred while sending all files: {e}")
-        await query.message.reply_text("❌ An unexpected error occurred. Please try again later.")
+        await send_and_delete_message(context, query.message.chat.id, "❌ An unexpected error occurred. Please try again later.")
 
 # ========================
 # COMMAND HANDLERS
@@ -316,7 +363,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await bot_can_respond(update, context):
         return
     if await is_banned(update.effective_user.id):
-        await update.message.reply_text("❌ You are banned from using this bot.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You are banned from using this bot.")
         return
     await save_user_info(update.effective_user)
 
@@ -352,7 +399,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
+    await send_and_delete_message(
+        context,
+        update.effective_chat.id,
         welcome_text,
         reply_markup=reply_markup,
         parse_mode="HTML"
@@ -364,7 +413,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await bot_can_respond(update, context):
         return
     if await is_banned(update.effective_user.id):
-        await update.message.reply_text("❌ You are banned from using this bot.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You are banned from using this bot.")
         return
     help_message = (
         "Here is a list of available commands optimized for this server:\n\n"
@@ -430,7 +479,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /purgerequests - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎𝑙𝑙 𝑗𝑜𝑖𝑛 𝑟𝑒𝑞𝑢𝑒𝑠𝑡𝑠 𝑓𝑟𝑜𝑚 𝑑𝑎𝑡𝑎𝑏𝑎𝑠𝑒\n"
         "• /totalrequests - 𝑔𝑒𝑡 𝑡𝑜𝑡𝑎𝑙 𝑛𝑢𝑚𝑏𝑒𝑟 𝑜𝑓 𝑗𝑜𝑖𝑛 𝑟𝑒𝑞𝑢𝑒𝑠𝑡 𝑓𝑟𝑜𝑚 𝑑𝑎𝑡𝑎𝑏𝑎𝑠𝑒\n"
     )
-    await update.message.reply_text(help_message)
+    await send_and_delete_message(context, update.effective_chat.id, help_message)
 
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -438,14 +487,14 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await bot_can_respond(update, context):
         return
     if await is_banned(update.effective_user.id):
-        await update.message.reply_text("❌ You are banned from using this bot.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You are banned from using this bot.")
         return
     info_message = (
         "**About this Bot**\n\n"
         "This bot helps you find and share files on Telegram.\n"
         "• Developed by Kaustav Ray."
     )
-    await update.message.reply_text(info_message, parse_mode="Markdown")
+    await send_and_delete_message(context, update.effective_chat.id, info_message, parse_mode="Markdown")
 
 
 async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -454,7 +503,7 @@ async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     # Retrieve all logs from the in-memory stream
@@ -466,10 +515,10 @@ async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recent_errors = error_logs[-20:]
 
     if not recent_errors:
-        await update.message.reply_text("✅ No recent errors found in the logs.")
+        await send_and_delete_message(context, update.effective_chat.id, "✅ No recent errors found in the logs.")
     else:
         log_text = "```\nRecent Error Logs:\n\n" + "\n".join(recent_errors) + "\n```"
-        await update.message.reply_text(log_text, parse_mode="MarkdownV2")
+        await send_and_delete_message(context, update.effective_chat.id, log_text, parse_mode="MarkdownV2")
 
     # Clear the log buffer to prevent it from growing too large
     log_stream.seek(0)
@@ -482,19 +531,19 @@ async def total_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     if users_col is None:
-        await update.message.reply_text("❌ Database not connected.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Database not connected.")
         return
 
     try:
         user_count = users_col.count_documents({})
-        await update.message.reply_text(f"📊 **Total Users:** {user_count}")
+        await send_and_delete_message(context, update.effective_chat.id, f"📊 **Total Users:** {user_count}")
     except Exception as e:
         logger.error(f"Error getting user count: {e}")
-        await update.message.reply_text("❌ Failed to retrieve user count. Please check the database connection.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Failed to retrieve user count. Please check the database connection.")
 
 
 async def total_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -503,20 +552,20 @@ async def total_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     if files_col is None:
-        await update.message.reply_text("❌ Database not connected.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Database not connected.")
         return
 
     try:
         # NOTE: This only gives the count from the CURRENT active database.
         file_count = files_col.count_documents({})
-        await update.message.reply_text(f"🗃️ **Total Files (Current DB):** {file_count}")
+        await send_and_delete_message(context, update.effective_chat.id, f"🗃️ **Total Files (Current DB):** {file_count}")
     except Exception as e:
         logger.error(f"Error getting file count: {e}")
-        await update.message.reply_text("❌ Failed to retrieve file count. Please check the database connection.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Failed to retrieve file count. Please check the database connection.")
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -525,10 +574,10 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
-    await update.message.reply_text("🔄 Collecting statistics, please wait...")
+    await send_and_delete_message(context, update.effective_chat.id, "🔄 Collecting statistics, please wait...")
 
     user_count = 0
     total_file_count_all_db = 0 # Accumulator for total files across all URIs
@@ -572,11 +621,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for idx, status in uri_stats.items():
             stats_message += f"  • URI #{idx + 1}: {status}\n"
 
-        await update.message.reply_text(stats_message, parse_mode="Markdown")
+        await send_and_delete_message(context, update.effective_chat.id, stats_message, parse_mode="Markdown")
 
     except Exception as e:
         logger.error(f"Error getting bot stats: {e}")
-        await update.message.reply_text("❌ Failed to retrieve statistics. Please check the database connection.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Failed to retrieve statistics. Please check the database connection.")
 
 
 async def delete_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -585,15 +634,15 @@ async def delete_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     if files_col is None:
-        await update.message.reply_text("❌ Database not connected.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Database not connected.")
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: /deletefile <MongoDB_ID>\nTip: Use /findfile <filename> to get the ID.")
+        await send_and_delete_message(context, update.effective_chat.id, "Usage: /deletefile <MongoDB_ID>\nTip: Use /findfile <filename> to get the ID.")
         return
 
     try:
@@ -602,12 +651,12 @@ async def delete_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         result = files_col.delete_one({"_id": ObjectId(file_id)})
 
         if result.deleted_count == 1:
-            await update.message.reply_text(f"✅ File with ID `{file_id}` has been deleted from the database.")
+            await send_and_delete_message(context, update.effective_chat.id, f"✅ File with ID `{file_id}` has been deleted from the database.")
         else:
-            await update.message.reply_text(f"❌ File with ID `{file_id}` not found in the database.")
+            await send_and_delete_message(context, update.effective_chat.id, f"❌ File with ID `{file_id}` not found in the database.")
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
-        await update.message.reply_text("❌ Invalid ID or an error occurred. Please provide a valid MongoDB ID.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Invalid ID or an error occurred. Please provide a valid MongoDB ID.")
 
 
 async def find_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -616,17 +665,17 @@ async def find_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: /findfile <filename>")
+        await send_and_delete_message(context, update.effective_chat.id, "Usage: /findfile <filename>")
         return
 
     query_filename = " ".join(context.args)
     all_results = []
 
-    await update.message.reply_text(f"🔎 Searching all {len(MONGO_URIS)} databases for `{query_filename}`...")
+    await send_and_delete_message(context, update.effective_chat.id, f"🔎 Searching all {len(MONGO_URIS)} databases for `{query_filename}`...")
 
     # Iterate through all URIs
     for idx, uri in enumerate(MONGO_URIS):
@@ -649,7 +698,7 @@ async def find_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     if not all_results:
-        await update.message.reply_text(f"❌ No files found with the name `{query_filename}` in any database.")
+        await send_and_delete_message(context, update.effective_chat.id, f"❌ No files found with the name `{query_filename}` in any database.")
         return
 
     response_text = f"📁 Found {len(all_results)} files matching `{query_filename}` across all databases:\n\n"
@@ -658,7 +707,7 @@ async def find_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     response_text += "Copy the ID of the file you want to delete and use the command:\n`/deletefile <ID>`\n\nNote: `/deletefile` only works on the currently *active* database. If the file is not found, you may need to manually update the `current_uri_index` and restart."
 
-    await update.message.reply_text(response_text, parse_mode="Markdown")
+    await send_and_delete_message(context, update.effective_chat.id, response_text, parse_mode="Markdown")
 
 
 async def delete_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -667,20 +716,20 @@ async def delete_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     if files_col is None:
-        await update.message.reply_text("❌ Database not connected.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Database not connected.")
         return
 
     try:
         # NOTE: This only deletes from the *current* active database.
         result = files_col.delete_many({})
-        await update.message.reply_text(f"✅ Deleted {result.deleted_count} files from the **current** database.")
+        await send_and_delete_message(context, update.effective_chat.id, f"✅ Deleted {result.deleted_count} files from the **current** database.")
     except Exception as e:
         logger.error(f"Error deleting all files: {e}")
-        await update.message.reply_text("❌ An error occurred while trying to delete all files from the current database.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ An error occurred while trying to delete all files from the current database.")
 
 
 async def ban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -689,20 +738,20 @@ async def ban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /ban <user_id>")
+        await send_and_delete_message(context, update.effective_chat.id, "Usage: /ban <user_id>")
         return
 
     user_to_ban_id = int(context.args[0])
     if user_to_ban_id in ADMINS:
-        await update.message.reply_text("❌ Cannot ban an admin.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Cannot ban an admin.")
         return
 
     if banned_users_col is None:
-        await update.message.reply_text("❌ Database not connected.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Database not connected.")
         return
 
     try:
@@ -711,10 +760,10 @@ async def ban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {"$set": {"_id": user_to_ban_id}},
             upsert=True
         )
-        await update.message.reply_text(f"🔨 User `{user_to_ban_id}` has been banned.")
+        await send_and_delete_message(context, update.effective_chat.id, f"🔨 User `{user_to_ban_id}` has been banned.")
     except Exception as e:
         logger.error(f"Error banning user: {e}")
-        await update.message.reply_text("❌ An error occurred while trying to ban the user.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ An error occurred while trying to ban the user.")
 
 
 async def unban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -723,29 +772,29 @@ async def unban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /unban <user_id>")
+        await send_and_delete_message(context, update.effective_chat.id, "Usage: /unban <user_id>")
         return
 
     user_to_unban_id = int(context.args[0])
 
     if banned_users_col is None:
-        await update.message.reply_text("❌ Database not connected.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Database not connected.")
         return
 
     try:
         result = banned_users_col.delete_one({"_id": user_to_unban_id})
 
         if result.deleted_count == 1:
-            await update.message.reply_text(f"✅ User `{user_to_unban_id}` has been unbanned.")
+            await send_and_delete_message(context, update.effective_chat.id, f"✅ User `{user_to_unban_id}` has been unbanned.")
         else:
-            await update.message.reply_text(f"❌ User `{user_to_unban_id}` was not found in the banned list.")
+            await send_and_delete_message(context, update.effective_chat.id, f"❌ User `{user_to_unban_id}` was not found in the banned list.")
     except Exception as e:
         logger.error(f"Error unbanning user: {e}")
-        await update.message.reply_text("❌ An error occurred while trying to unban the user.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ An error occurred while trying to unban the user.")
 
 
 async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -757,11 +806,11 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     if user_id not in ADMINS:
-        await update.message.reply_text("❌ You do not have permission to use this command.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: /broadcast <message>")
+        await send_and_delete_message(context, update.effective_chat.id, "Usage: /broadcast <message>")
         return
 
     broadcast_text = " ".join(context.args)
@@ -773,7 +822,7 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent_count = 0
     failed_count = 0
 
-    await update.message.reply_text(f"🚀 Starting broadcast to {len(user_ids)} users...")
+    await send_and_delete_message(context, update.effective_chat.id, f"🚀 Starting broadcast to {len(user_ids)} users...")
 
     for uid in user_ids:
         try:
@@ -787,7 +836,7 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             failed_count += 1
             logger.error(f"Unknown error sending broadcast to user {uid}: {e}")
 
-    await update.message.reply_text(f"✅ Broadcast complete!\n\nSent to: {sent_count}\nFailed: {failed_count}")
+    await send_and_delete_message(context, update.effective_chat.id, f"✅ Broadcast complete!\n\nSent to: {sent_count}\nFailed: {failed_count}")
 
 
 # ========================
@@ -859,13 +908,13 @@ async def save_file_from_pm(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 current_uri_index = idx
                 logger.info(f"Switched active MongoDB connection to index {current_uri_index}.")
 
-            await update.message.reply_text(f"✅ Saved to DB #{idx + 1}: {clean_name}")
+            await send_and_delete_message(context, update.effective_chat.id, f"✅ Saved to DB #{idx + 1}: {clean_name}")
             saved = True
             break
         except Exception as e:
             logger.error(f"Error saving file with URI #{idx + 1}: {e}")
             if idx == current_uri_index and len(MONGO_URIS) > 1:
-                 await update.message.reply_text(f"⚠️ Primary DB failed. Trying next available URI...")
+                 await send_and_delete_message(context, update.effective_chat.id, f"⚠️ Primary DB failed. Trying next available URI...")
         finally:
             if temp_client and idx != current_uri_index:
                 temp_client.close()
@@ -873,7 +922,7 @@ async def save_file_from_pm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not saved:
         logger.error("All MongoDB URIs have been tried and failed.")
-        await update.message.reply_text("❌ Failed to save file on all available databases.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Failed to save file on all available databases.")
 
 
 async def save_file_from_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -939,7 +988,8 @@ async def save_file_from_channel(update: Update, context: ContextTypes.DEFAULT_T
 
             # Send **INSTANT** success notification to the admin
             try:
-                await context.bot.send_message(
+                await send_and_delete_message(
+                    context,
                     user_id,
                     f"✅ File **`{escape_markdown(clean_name)}`** has been indexed successfully from the database channel to DB #{idx + 1}.",
                     parse_mode="MarkdownV2"
@@ -953,7 +1003,7 @@ async def save_file_from_channel(update: Update, context: ContextTypes.DEFAULT_T
             logger.error(f"Error saving file from channel with URI #{idx + 1}: {e}")
             if idx == current_uri_index and len(MONGO_URIS) > 1:
                 try:
-                    await context.bot.send_message(user_id, "⚠️ Primary DB failed. Trying next available URI...")
+                    await send_and_delete_message(context, user_id, "⚠️ Primary DB failed. Trying next available URI...")
                 except TelegramError:
                     pass
         finally:
@@ -963,7 +1013,7 @@ async def save_file_from_channel(update: Update, context: ContextTypes.DEFAULT_T
     if not saved:
         logger.error("All MongoDB URIs have been tried and failed.")
         try:
-            await context.bot.send_message(user_id, "❌ Failed to save file on all available databases.")
+            await send_and_delete_message(context, user_id, "❌ Failed to save file on all available databases.")
         except TelegramError:
             pass
 
@@ -978,7 +1028,7 @@ async def search_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # In private chat, only admins can search for files.
     if update.effective_chat.type == "private" and update.effective_user.id not in ADMINS:
-        await update.message.reply_text("❌ Sorry, only admins can use the search function in a private chat.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Sorry, only admins can use the search function in a private chat.")
         return
 
     if await is_banned(update.effective_user.id):
@@ -993,11 +1043,11 @@ async def search_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("Join Channel: @code_boost", url="https://t.me/code_boost")],
             [InlineKeyboardButton("Join Channel: @krbook_official", url="https://t.me/krbook_official")]
         ])
-        await update.message.reply_text("❌ You must join ALL our channels to use this bot!", reply_markup=keyboard)
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You must join ALL our channels to use this bot!", reply_markup=keyboard)
         return
 
     # Send instant feedback
-    await update.message.reply_text(f"🔍 Searching all {len(MONGO_URIS)} databases...")
+    await send_and_delete_message(context, update.effective_chat.id, f"🔍 Searching all {len(MONGO_URIS)} databases...")
 
     raw_query = update.message.text.strip()
     # Normalize query for better fuzzy search
@@ -1018,7 +1068,7 @@ async def search_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     words = [re.escape(word) for word in normalized_query.split() if len(word) > 1]
 
     if not words:
-        await update.message.reply_text("❌ Query too short or invalid. Please try a longer search term.")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Query too short or invalid. Please try a longer search term.")
         return
 
     # Create an OR condition for the words (e.g., /word1|word2|.../i)
@@ -1051,7 +1101,7 @@ async def search_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Fuzzy Ranking (to ensure the best match is first) ---
 
     if not preliminary_results:
-        await update.message.reply_text("❌ No relevant files found. For your query contact @kaustavhibot")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ No relevant files found. For your query contact @kaustavhibot")
         return
 
     results_with_score = []
@@ -1078,7 +1128,7 @@ async def search_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
     final_results = [result[0] for result in sorted_results[:50]]
 
     if not final_results:
-        await update.message.reply_text("❌ No relevant files found after filtering by relevance. For your query contact @kaustavhibot")
+        await send_and_delete_message(context, update.effective_chat.id, "❌ No relevant files found after filtering by relevance. For your query contact @kaustavhibot")
         return
 
     # Pass the full result list to the pagination function for consistency
@@ -1129,11 +1179,22 @@ async def send_results_page(chat_id, results, page, context: ContextTypes.DEFAUL
     try:
         if new_message or message_id is None:
             # Send as a new message (used for initial search result)
-            await context.bot.send_message(
-                chat_id, text, reply_markup=reply_markup, parse_mode="Markdown"
+            sent_message, deletion_task = await send_and_delete_message(
+                context,
+                chat_id,
+                text,
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
             )
+            if sent_message and deletion_task:
+                # Store the message ID and its deletion task so we can manage it during pagination
+                context.chat_data['last_search_message'] = {
+                    'message_id': sent_message.message_id,
+                    'deletion_task': deletion_task
+                }
         else:
             # Edit the existing message (used for pagination)
+            # Note: Edited messages don't get a new deletion timer. The original timer still applies.
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
@@ -1155,7 +1216,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await is_banned(update.effective_user.id):
-        await query.message.reply_text("❌ You are banned from using this bot.")
+        await send_and_delete_message(context, query.message.chat.id, "❌ You are banned from using this bot.")
         return
 
     await save_user_info(update.effective_user)
@@ -1165,14 +1226,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("Join Channel: @code_boost", url="https://t.me/code_boost")],
             [InlineKeyboardButton("Join Channel: @krbook_official", url="https://tme/krbook_official")]
         ])
-        await query.message.reply_text("❌ You must join ALL our channels to use this bot!", reply_markup=keyboard)
+        await send_and_delete_message(context, query.message.chat.id, "❌ You must join ALL our channels to use this bot!", reply_markup=keyboard)
         return
 
     data = query.data
 
     if data.startswith("get_"):
         # Send a message to the user to confirm the request is being processed
-        await query.message.reply_text("⌛ Processing your request, please wait...")
+        await send_and_delete_message(context, query.message.chat.id, "⌛ Processing your request, please wait...")
 
         file_id_str = data.split("_", 1)[1]
         file_data = None
@@ -1202,25 +1263,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Schedule the slow `send_file_task` to run in the background.
             asyncio.create_task(send_file_task(query, context, file_data))
         else:
-            await query.message.reply_text("❌ File not found. The file may have been deleted or the database is inaccessible.")
+            await send_and_delete_message(context, query.message.chat.id, "❌ File not found. The file may have been deleted or the database is inaccessible.")
 
     elif data.startswith("page_"):
         # This handles both 'Prev' and 'Next' clicks
         _, page_str, search_query = data.split("_", 2)
         page = int(page_str)
 
+        # Cancel the previous deletion task
+        if 'last_search_message' in context.chat_data:
+            old_task = context.chat_data['last_search_message'].get('deletion_task')
+            if old_task and not old_task.done():
+                old_task.cancel()
+                logger.info(f"Cancelled deletion task for message {context.chat_data['last_search_message']['message_id']}")
+
         # Retrieve search results from user_data
         final_results = context.user_data.get('search_results')
 
         if not final_results:
             # Re-run the search if results are lost (e.g., bot restarted or context cleared)
-            await query.message.reply_text("⚠️ Search results lost. Re-running search...")
+            await send_and_delete_message(context, query.message.chat.id, "⚠️ Search results lost. Re-running search...")
 
             # This logic is copied from the search_files function for recovery purposes
             normalized_query = search_query.replace("_", " ").replace(".", " ").replace("-", " ").strip()
             words = [re.escape(word) for word in normalized_query.split() if len(word) > 1]
             if not words:
-                await query.message.reply_text("❌ Query too short or invalid.")
+                await send_and_delete_message(context, query.message.chat.id, "❌ Query too short or invalid.")
                 return
 
             regex_pattern = re.compile("|".join(words), re.IGNORECASE)
@@ -1256,15 +1324,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_results = [result[0] for result in sorted_results[:50]]
 
             if not final_results:
-                await query.message.reply_text("❌ No relevant files found after recovery.")
+                await send_and_delete_message(context, query.message.chat.id, "❌ No relevant files found after recovery.")
                 return
 
             # Save recovered results
             context.user_data['search_results'] = final_results
             context.user_data['search_query'] = search_query
 
-        # --- THE KEY CHANGE ---
-        # Edit the existing message instead of deleting and sending a new one
+        # Edit the existing message
         await send_results_page(
             query.message.chat.id,
             final_results,
@@ -1275,6 +1342,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_message=False # Explicitly state this is an edit
         )
 
+        # Schedule a new deletion task for the edited message
+        new_deletion_task = asyncio.create_task(delete_message_after_delay(context, query.message.chat.id, query.message.message_id, 5 * 60))
+        context.chat_data['last_search_message'] = {
+            'message_id': query.message.message_id,
+            'deletion_task': new_deletion_task
+        }
+
     elif data == "start_about":
         await query.message.delete()
         info_message = (
@@ -1282,7 +1356,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "This bot helps you find and share files on Telegram.\n"
             "• Developed by Kaustav Ray."
         )
-        await query.message.reply_text(info_message, parse_mode="Markdown")
+        await send_and_delete_message(context, query.message.chat.id, info_message, parse_mode="Markdown")
 
     elif data == "start_help":
         await query.message.delete()
@@ -1350,7 +1424,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /purgerequests - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎𝑙𝑙 𝑗𝑜𝑖𝑛 𝑟𝑒𝑞𝑢𝑒𝑠𝑡𝑠 𝑓𝑟𝑜𝑚 𝑑𝑎𝑡𝑎𝑏𝑎𝑠𝑒\n"
             "• /totalrequests - 𝑔𝑒𝑡 𝑡𝑜𝑡𝑎𝑙 𝑛𝑢𝑚𝑏𝑒𝑟 𝑜𝑓 𝑗𝑜𝑖𝑛 𝑟𝑒𝑞𝑢𝑒𝑠𝑡 𝑓𝑟𝑜𝑚 𝑑𝑎𝑡𝑎𝑏𝑎𝑠𝑒\n"
         )
-        await query.message.reply_text(help_message)
+        await send_and_delete_message(context, query.message.chat.id, help_message)
 
     elif data == "start_close":
         await query.message.delete()
@@ -1360,7 +1434,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("sendall_"):
 
         # Update the user message to reflect that only the current page is being sent
-        await query.message.reply_text("📨 Sending all files on the **current page**. Please check your private chat with me. This may take a moment...")
+        await send_and_delete_message(context, query.message.chat.id, "📨 Sending all files on the **current page**. Please check your private chat with me. This may take a moment...")
 
         _, page_str, search_query = data.split("_", 2)
         page = int(page_str)
@@ -1373,7 +1447,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             normalized_query = search_query.replace("_", " ").replace(".", " ").replace("-", " ").strip()
             words = [re.escape(word) for word in normalized_query.split() if len(word) > 1]
             if not words:
-                await query.message.reply_text("❌ Query too short or invalid for recovery.")
+                await send_and_delete_message(context, query.message.chat.id, "❌ Query too short or invalid for recovery.")
                 return
 
             regex_pattern = re.compile("|".join(words), re.IGNORECASE)
@@ -1409,7 +1483,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_results = [result[0] for result in sorted_results[:50]]
 
             if not final_results:
-                await query.message.reply_text("❌ No relevant files found after recovery for sendall.")
+                await send_and_delete_message(context, query.message.chat.id, "❌ No relevant files found after recovery for sendall.")
                 return
 
             # Save recovered results
@@ -1421,7 +1495,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         files_to_send = final_results[page * 10:(page + 1) * 10]
 
         if not files_to_send:
-            await query.message.reply_text("❌ No files found on this page to send.")
+            await send_and_delete_message(context, query.message.chat.id, "❌ No files found on this page to send.")
             return
 
         # Schedule the batch sending task
