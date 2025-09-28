@@ -553,9 +553,20 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 temp_client.admin.command('ismaster')
                 temp_db = temp_client["telegram_files"]
                 temp_files_col = temp_db["files"]
-                # Use estimated_document_count for fast approximation
+                # Get file count
                 file_count = temp_files_col.estimated_document_count()
-                uri_stats[idx] = f"✅ {file_count} files"
+
+                # Get DB stats
+                db_stats = temp_db.command('dbStats', 1)
+                used_storage_mib = db_stats.get('dataSize', 0) / (1024 * 1024)
+                total_storage_mib = db_stats.get('storageSize', 0) / (1024 * 1024)
+                free_storage_mib = total_storage_mib - used_storage_mib
+
+                uri_stats[idx] = (
+                    f"✅ {file_count} files\n"
+                    f"     ★ 𝚄𝚂𝙴𝙳 𝚂𝚃𝙾𝚁𝙰𝙶𝙴: <code>{used_storage_mib:.2f}</code> 𝙼𝚒𝙱\n"
+                    f"     ★ 𝙵𝚁𝙴𝙴 𝚂𝚃𝙾𝚁𝙰𝙶𝙴: <code>{free_storage_mib:.2f}</code> 𝙼𝚒𝙱"
+                )
                 total_file_count_all_db += file_count # Accumulate count
             except Exception as e:
                 logger.warning(f"Failed to connect or get file count for URI #{idx + 1}: {e}")
@@ -566,18 +577,18 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # 3. Format the output message
         stats_message = (
-            f"📊 **Bot Statistics**\n"
+            f"📊 <b>Bot Statistics</b>\n"
             f"  • Total Users: {user_count}\n"
             f"  • Total Connected Groups: {len(JOIN_CHECK_CHANNEL)}\n" # Using the count of JOIN_CHECK_CHANNEL
             f"  • Total Files (All DB): {total_file_count_all_db}\n" # Total count from all URIs
-            f"  • **Total MongoDB URIs:** {len(MONGO_URIS)}\n"
-            f"  • **Current Active URI:** #{current_uri_index + 1}\n\n"
-            f"**File Count per URI:**\n"
+            f"  • <b>Total MongoDB URIs:</b> {len(MONGO_URIS)}\n"
+            f"  • <b>Current Active URI:</b> #{current_uri_index + 1}\n\n"
+            f"<b>File Count per URI:</b>\n"
         )
         for idx, status in uri_stats.items():
             stats_message += f"  • URI #{idx + 1}: {status}\n"
 
-        await send_and_delete_message(context, update.effective_chat.id, stats_message, parse_mode="Markdown")
+        await send_and_delete_message(context, update.effective_chat.id, stats_message, parse_mode="HTML")
 
     except Exception as e:
         logger.error(f"Error getting bot stats: {e}")
