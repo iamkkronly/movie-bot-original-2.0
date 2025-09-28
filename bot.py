@@ -12,6 +12,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ChatMemberHandler,
     ContextTypes,
     filters,
 )
@@ -27,7 +28,6 @@ import io
 BOT_TOKEN = "8410215954:AAE0icLhQeXs4aIU0pA_wrhMbOOziPQLx24"  # Bot Token
 DB_CHANNEL = -1002975831610  # Database channel
 LOG_CHANNEL = -1002988891392  # Channel to log user queries
-ALLOWED_GROUP_ID = -1001234567890  # The only group ID the bot will respond in
 # Channels users must join for access
 JOIN_CHECK_CHANNEL = [-1002692055617, -1002551875503, -1002839913869]
 ADMINS = [6705618257]        # Admin IDs
@@ -38,6 +38,28 @@ CUSTOM_PROMO_MESSAGE = (
     "Join our main channel: @filestore4u\n"
     "Join our channel: @code_boost\n"
     "Join our channel: @krbook_official"
+)
+
+HELP_TEXT = (
+    "**Here is a list of available commands:**\n\n"
+    "**User Commands:**\n"
+    "• `/start` - Start the bot.\n"
+    "• `/help` - Show this help message.\n"
+    "• `/info` - Get bot information.\n"
+    "• Send any text to search for a file (admins only in private chat).\n\n"
+    "**Admin Commands:**\n"
+    "• `/log` - Show recent error logs.\n"
+    "• `/total_users` - Get the total number of users.\n"
+    "• `/total_files` - Get the total number of files in the current DB.\n"
+    "• `/stats` - Get bot and database statistics.\n"
+    "• `/findfile <name>` - Find a file's ID by name.\n"
+    "• `/deletefile <id>` - Delete a file from the database.\n"
+    "• `/deleteall` - Delete all files from the current database.\n"
+    "• `/ban <user_id>` - Ban a user.\n"
+    "• `/unban <user_id>` - Unban a user.\n"
+    "• `/broadcast <msg>` - Send a message to all users.\n"
+    "• `/grp_broadcast <msg>` - Send a message to all connected groups where the bot is an admin.\n"
+    "• Send a file to me in a private message to index it."
 )
 
 # A list of MongoDB URIs to use. Add as many as you need.
@@ -63,6 +85,7 @@ db = None
 files_col = None
 users_col = None
 banned_users_col = None
+groups_col = None
 
 
 # Logging setup with an in-memory buffer for the /log command
@@ -146,7 +169,7 @@ async def bot_can_respond(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """
     Check if the bot should respond in a group chat.
     - Allows all private chats.
-    - In groups, responds only in the ALLOWED_GROUP_ID and only if the bot is an administrator.
+    - In groups, responds only if the bot is an administrator.
     """
     chat = update.effective_chat
 
@@ -154,18 +177,12 @@ async def bot_can_respond(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return True
 
     if chat.type in ["group", "supergroup"]:
-        # First, check if the group is the allowed one.
-        if chat.id != ALLOWED_GROUP_ID:
-            logger.info(f"Ignoring message from non-allowed group {chat.id}.")
-            return False
-
-        # If it's the correct group, then check for admin status.
         try:
             bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
-            if bot_member.status == "administrator":
+            if bot_member.status in ["administrator", "creator"]:
                 return True
             else:
-                logger.info(f"Bot is not an admin in the allowed group {chat.id}, ignoring message.")
+                logger.info(f"Bot is not an admin in group {chat.id}, ignoring message.")
                 return False
         except TelegramError as e:
             logger.error(f"Could not check bot status in group {chat.id}: {e}")
@@ -218,7 +235,7 @@ async def delete_message_after_delay(context, chat_id, message_id, delay):
 
 def connect_to_mongo():
     """Connect to the MongoDB URI at the current index."""
-    global mongo_client, db, files_col, users_col, banned_users_col
+    global mongo_client, db, files_col, users_col, banned_users_col, groups_col
     try:
         uri = MONGO_URIS[current_uri_index]
         # Set serverSelectionTimeoutMS to 5 seconds to fail fast if the connection is dead
@@ -231,6 +248,7 @@ def connect_to_mongo():
         files_col = db["files"]
         users_col = db["users"]
         banned_users_col = db["banned_users"]
+        groups_col = db["groups"]
         logger.info(f"Successfully connected to MongoDB at index {current_uri_index}.")
         return True
     except (PyMongoError, IndexError) as e:
@@ -415,28 +433,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update.effective_user.id):
         await send_and_delete_message(context, update.effective_chat.id, "❌ You are banned from using this bot.")
         return
-    help_message = (
-        "**Here is a list of available commands:**\n\n"
-        "**User Commands:**\n"
-        "• `/start` - Start the bot.\n"
-        "• `/help` - Show this help message.\n"
-        "• `/info` - Get bot information.\n"
-        "• Send any text to search for a file (admins only in private chat).\n\n"
-        "**Admin Commands:**\n"
-        "• `/log` - Show recent error logs.\n"
-        "• `/total_users` - Get the total number of users.\n"
-        "• `/total_files` - Get the total number of files in the current DB.\n"
-        "• `/stats` - Get bot and database statistics.\n"
-        "• `/findfile <name>` - Find a file's ID by name.\n"
-        "• `/deletefile <id>` - Delete a file from the database.\n"
-        "• `/deleteall` - Delete all files from the current database.\n"
-        "• `/ban <user_id>` - Ban a user.\n"
-        "• `/unban <user_id>` - Unban a user.\n"
-        "• `/broadcast <msg>` - Send a message to all users.\n"
-        "• `/grp_broadcast <msg>` - Send a message to the allowed group.\n"
-        "• Send a file to me in a private message to index it."
-    )
-    await send_and_delete_message(context, update.effective_chat.id, help_message, parse_mode="Markdown")
+    await send_and_delete_message(context, update.effective_chat.id, HELP_TEXT, parse_mode="Markdown")
 
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -797,7 +794,7 @@ async def broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def grp_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to broadcast a message to the allowed group."""
+    """Admin command to broadcast a message to all connected groups where the bot is an admin."""
     if not await bot_can_respond(update, context):
         return
     user_id = update.effective_user.id
@@ -811,12 +808,112 @@ async def grp_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TY
 
     broadcast_text = " ".join(context.args)
 
-    try:
-        await context.bot.send_message(chat_id=ALLOWED_GROUP_ID, text=broadcast_text)
-        await send_and_delete_message(context, update.effective_chat.id, f"✅ Message sent to group {ALLOWED_GROUP_ID}.")
-    except TelegramError as e:
-        logger.error(f"Failed to send group broadcast to {ALLOWED_GROUP_ID}: {e}")
-        await send_and_delete_message(context, update.effective_chat.id, f"❌ Failed to send message to the group. Error: {e}")
+    # Fetch all unique group IDs from all databases
+    all_group_ids = set()
+    logger.info("Fetching all group IDs for group broadcast...")
+    for uri in MONGO_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_client.admin.command('ismaster')
+            temp_db = temp_client["telegram_files"]
+            temp_groups_col = temp_db["groups"]
+
+            group_docs = temp_groups_col.find({}, {"_id": 1})
+            for doc in group_docs:
+                all_group_ids.add(doc['_id'])
+        except Exception as e:
+            logger.error(f"Failed to fetch group IDs from URI {uri[:40]}...: {e}")
+        finally:
+            if temp_client:
+                temp_client.close()
+
+    if not all_group_ids:
+        await send_and_delete_message(context, update.effective_chat.id, "❌ No groups found in the database to broadcast to.")
+        return
+
+    # Send message to each group
+    sent_count = 0
+    failed_count = 0
+    await send_and_delete_message(context, update.effective_chat.id, f"🚀 Starting group broadcast to {len(all_group_ids)} groups...")
+
+    for group_id in all_group_ids:
+        try:
+            # Check for admin status before sending to be safe
+            member = await context.bot.get_chat_member(group_id, context.bot.id)
+            if member.status in ["administrator", "creator"]:
+                await context.bot.send_message(chat_id=group_id, text=broadcast_text)
+                sent_count += 1
+                logger.info(f"Group broadcast sent to group {group_id}")
+            else:
+                logger.warning(f"Skipping broadcast to group {group_id}, bot is no longer an admin.")
+                failed_count += 1
+            await asyncio.sleep(0.1)  # Rate limiting
+        except TelegramError as e:
+            logger.error(f"Failed to send broadcast to group {group_id}: {e}")
+            failed_count += 1
+
+    await send_and_delete_message(context, update.effective_chat.id, f"✅ Group broadcast complete!\n\nSent to: {sent_count} groups\nFailed: {failed_count} groups")
+
+
+async def on_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the bot being added to or removed from a group."""
+    my_chat_member = update.my_chat_member
+
+    # Check if the update is for a group/supergroup and if the bot is the one being updated
+    if my_chat_member.chat.type in ["group", "supergroup"] and my_chat_member.new_chat_member.user.id == context.bot.id:
+        group_id = my_chat_member.chat.id
+        new_status = my_chat_member.new_chat_member.status
+        old_status = my_chat_member.old_chat_member.status
+
+        # If the bot was promoted to administrator or is the creator
+        if new_status in ["administrator", "creator"]:
+            logger.info(f"Bot was added/promoted as admin in group {group_id}. Saving to database.")
+
+            # Try to save the group ID to the database, cycling through all URIs
+            saved = False
+            for uri in MONGO_URIS:
+                temp_client = None
+                try:
+                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                    temp_client.admin.command('ismaster')
+                    temp_db = temp_client["telegram_files"]
+                    temp_groups_col = temp_db["groups"]
+
+                    # Use update_one with upsert=True to add/update the group ID
+                    temp_groups_col.update_one({"_id": group_id}, {"$set": {"_id": group_id}}, upsert=True)
+                    saved = True
+                    logger.info(f"Successfully saved/updated group {group_id} in DB using URI: {uri[:40]}...")
+                    break
+                except Exception as e:
+                    logger.error(f"Failed to save group {group_id} with URI {uri[:40]}...: {e}")
+                finally:
+                    if temp_client:
+                        temp_client.close()
+
+            if not saved:
+                logger.error(f"Failed to save group {group_id} to any database.")
+
+        # If the bot was kicked, left, or demoted from admin
+        elif old_status in ["administrator", "creator"] and new_status not in ["administrator", "creator"]:
+            logger.info(f"Bot was removed or demoted from admin in group {group_id}. Removing from database.")
+
+            # Try to remove the group ID from all databases
+            for uri in MONGO_URIS:
+                temp_client = None
+                try:
+                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                    temp_client.admin.command('ismaster')
+                    temp_db = temp_client["telegram_files"]
+                    temp_groups_col = temp_db["groups"]
+
+                    temp_groups_col.delete_one({"_id": group_id})
+                    logger.info(f"Attempted removal of group {group_id} from DB using URI: {uri[:40]}...")
+                except Exception as e:
+                    logger.error(f"Failed to remove group {group_id} with URI {uri[:40]}...: {e}")
+                finally:
+                    if temp_client:
+                        temp_client.close()
 
 
 # ========================
@@ -1340,71 +1437,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "start_help":
         await query.message.delete()
-        help_message = (
-            "Here is a list of available commands optimized for this server:\n\n"
-            "• /start - 𝑇𝑜 𝑠𝑡𝑎𝑟𝑡 𝑡ℎ𝑒 𝑏𝑜𝑡\n"
-            "• /setskip - 𝑇𝑜 𝑠𝑘𝑖𝑝 𝑛𝑢𝑚𝑏𝑒𝑟 𝑜𝑓 𝑚𝑒𝑠𝑠𝑎𝑔𝑒𝑠 𝑤ℎ𝑒𝑛 𝑖𝑛𝑑𝑒𝑥𝑖𝑛𝑔 𝑓𝑖𝑙𝑒𝑠\n"
-            "• /logs - 𝑡𝑜 𝑔𝑒𝑡 𝑡ℎ𝑒 𝑟𝑒𝑐𝑒𝑛𝑡 𝑒𝑟𝑟𝑜𝑟𝑠\n"
-            "• /stats - 𝑡𝑜 𝑔𝑒𝑡 𝑠𝑡𝑎𝑡𝑢𝑠 𝑜𝑓 𝑓𝑖𝑙𝑒𝑠 𝑖𝑛 𝑑𝑏.\n"
-            "• /connections - 𝑇𝑜 𝑠𝑒𝑒 𝑎𝑙𝑙 𝑐𝑜𝑛𝑛𝑒𝑐𝑡𝑒𝑑 𝑔𝑟𝑜𝑢𝑝𝑠\n"
-            "• /settings - 𝑇𝑜 𝑜𝑝𝑒𝑛 𝑠𝑒𝑡𝑡𝑖𝑛𝑔𝑠 𝑚𝑒𝑛𝑢\n"
-            "• /filter - 𝑎𝑑𝑑 𝑚𝑎𝑛𝑢𝑎𝑙 𝑓𝑖𝑙𝑡𝑒𝑟𝑠\n"
-            "• /filters - 𝑣𝑖𝑒𝑤 𝑓𝑖𝑙𝑡𝑒𝑟𝑠\n"
-            "• /connect - 𝑐𝑜𝑛𝑛𝑒𝑐𝑡 𝑡𝑜 𝑃𝑀.\n"
-            "• /disconnect - 𝑑𝑖𝑠𝑐𝑜𝑛𝑛𝑒𝑐𝑡 𝑓𝑟𝑜𝑚 𝑃𝑀\n"
-            "• /del - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎 𝑓𝑖𝑙𝑡𝑒𝑟\n"
-            "• /delall - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎𝑙𝑙 𝑓𝑖𝑙𝑡𝑒𝑟𝑠\n"
-            "• /deleteall - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎𝑙𝑙 𝑖𝑛𝑑𝑒𝑥𝑒𝑑 𝑓𝑖𝑙𝑒𝑠.\n"
-            "• /delete - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎 𝑠𝑝𝑒𝑐𝑖𝑓𝑖𝑐 𝑓𝑖𝑙𝑒 𝑓𝑟𝑜𝑚 𝑖𝑛𝑑𝑒𝑥.\n"
-            "• /info - 𝑔𝑒𝑡 𝑢𝑠𝑒𝑟 𝑖𝑛𝑓𝑜\n"
-            "• /id - 𝑔𝑒𝑡 𝑡𝑔 𝑖𝑑𝑠.\n"
-            "• /imdb - 𝑓𝑒𝑡𝑐ℎ 𝑖𝑛𝑓𝑜 𝑓𝑟𝑜𝑚 𝑖𝑚𝑑𝑏.\n"
-            "• /users - 𝑡𝑜 𝑔𝑒𝑡 𝑙𝑖𝑠𝑡 𝑜𝑓 𝑚𝑦 𝑢𝑠𝑒𝑟𝑠 𝑎𝑛𝑑 𝑖𝑑𝑠.\n"
-            "• /chats - 𝑡𝑜 𝑔𝑒𝑡 𝑙𝑖𝑠𝑡 𝑜𝑓 𝑡ℎ𝑒 𝑚𝑦 𝑐ℎ𝑎𝑡𝑠 𝑎𝑛𝑑 𝑖𝑑𝑠 \n"
-            "• /leave  - 𝑡𝑜 𝑙𝑒𝑎𝑣𝑒 𝑓𝑟𝑜𝑚 𝑎 𝑐ℎ𝑎𝑡.\n"
-            "• /disable  -  𝑑𝑜 𝑑𝑖𝑠𝑎𝑏𝑙𝑒 𝑎 𝑐ℎ𝑎𝑡.\n"
-            "• /enable - 𝑟𝑒-𝑒𝑛𝑎𝑏𝑙𝑒 𝑐ℎ𝑎𝑡.\n"
-            "• /ban  - 𝑡𝑜 𝑏𝑎𝑛 𝑎 𝑢𝑠𝑒𝑟.\n"
-            "• /unban  - 𝑡𝑜 𝑢𝑛𝑏𝑎𝑛 𝑎 𝑢𝑠𝑒𝑟.\n"
-            "• /channel - 𝑡𝑜 𝑔𝑒𝑡 𝑙𝑖𝑠𝑡 𝑜𝑓 𝑡𝑜𝑡𝑎𝑙 𝑐𝑜𝑛𝑛𝑒𝑐𝑡𝑒𝑑 𝑐ℎ𝑎𝑛𝑛𝑒𝑙𝑠\n"
-            "• /broadcast - 𝑡𝑜 𝑏𝑟𝑜𝑎𝑑𝑐𝑎𝑠𝑡 𝑎 𝑚𝑒𝑠𝑠𝑎𝑔𝑒 𝑡𝑜 𝑎𝑙𝑙 𝑢𝑠𝑒𝑟𝑠\n"
-            "• /grp_broadcast - 𝑇𝑜 𝑏𝑟𝑜𝑎𝑑𝑐𝑎𝑠𝑡 𝑎 𝑚𝑒𝑠𝑠𝑎𝑔𝑒 𝑡𝑜 𝑎𝑙𝑙 𝑐𝑜𝑛𝑛𝑒𝑐𝑡𝑒𝑑 𝑔𝑟𝑜𝑢𝑝𝑠.\n"
-            "• /batch - 𝑡𝑜 𝑐𝑟𝑒𝑎𝑡𝑒 𝑙𝑖𝑛𝑘 𝑓𝑜𝑟 𝑚𝑢𝑙𝑡𝑖𝑝𝑙𝑒 𝑝𝑜𝑠𝑡𝑠\n"
-            "• /link - 𝑡𝑜 𝑐𝑟𝑒𝑎𝑡𝑒 𝑙𝑖𝑛𝑘 𝑓𝑜𝑟 𝑜𝑛𝑒 𝑝𝑜𝑠𝑡\n"
-            "• /set_template - 𝑇𝑜 𝑠𝑒𝑡 𝑎 𝑐𝑢𝑠𝑡𝑜𝑚 𝐼𝑀𝐷𝑏 𝑡𝑒𝑚𝑝𝑙𝑎𝑡𝑒 𝑓𝑜𝑟 𝑖𝑛𝑑𝑖𝑣𝑖𝑑𝑢𝑎𝑙 𝑔𝑟𝑜𝑢𝑝𝑠\n"
-            "• /gfilter - 𝑇𝑜 𝑎𝑑𝑑 𝑔𝑙𝑜𝑏𝑎𝑙 𝑓𝑖𝑙𝑡𝑒𝑟𝑠.\n"
-            "• /gfilters - 𝑇𝑜 𝑣𝑖𝑒𝑤 𝑙𝑖𝑠𝑡 𝑜𝑓 𝑎𝑙𝑙 𝑔𝑙𝑜𝑏𝑎𝑙 𝑓𝑖𝑙𝑡𝑒𝑟𝑠.\n"
-            "• /delg - 𝑇𝑜 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎 𝑠𝑝𝑒𝑐𝑖𝑓𝑖𝑐 𝑔𝑙𝑜𝑏𝑎𝑙 𝑓𝑖𝑙𝑡𝑒𝑟.\n"
-            "• /delallg - 𝑇𝑜 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎𝑙𝑙 𝑔𝑙𝑜𝑏𝑎𝑙 𝑓𝑖𝑙𝑡𝑒𝑟𝑠 𝑓𝑟𝑜𝑚 𝑡ℎ𝑒 𝑏𝑜𝑡'𝑠 𝑑𝑎𝑡𝑎𝑏𝑎𝑠𝑒.\n"
-            "• /deletefiles - 𝑇𝑜 𝑑𝑒𝑙𝑒𝑡𝑒 𝑃𝑟𝑒𝐷𝑉𝐷 𝑎𝑛𝑑 𝐶𝑎𝑚𝑅𝑖𝑝 𝐹𝑖𝑙𝑒𝑠 𝑓𝑟𝑜𝑚 𝑡ℎ𝑒 𝑏𝑜𝑡'𝑠 𝑑𝑎𝑡𝑎𝑏𝑎𝑠𝑒.\n"
-            "• /add_premium - 𝐴𝑑𝑑 𝑢𝑠𝑒𝑟 𝑡𝑜 𝑝𝑟𝑒𝑚𝑖𝑢𝑚 𝑙𝑖𝑠𝑡\n"
-            "• /remove_premium - 𝑅𝑒𝑚𝑜𝑣𝑒 𝑢𝑠𝑒𝑟 𝑓𝑟𝑜𝑚 𝑝𝑟𝑒𝑚𝑖𝑢𝑚 𝑙𝑖𝑠𝑡\n"
-            "• /plan - 𝐶ℎ𝑒𝑐𝑘 𝑝𝑙𝑎𝑛 𝑑𝑒𝑡𝑎𝑖𝑙𝑠\n"
-            "• /myplan - 𝐶ℎ𝑒𝑐𝑘 𝑦𝑜𝑢𝑟 𝑝𝑙𝑎𝑛 𝑠𝑡𝑎𝑡𝑠\n"
-            "• /shortlink - 𝑠𝑒𝑡 𝑦𝑜𝑢𝑟 𝑢𝑟𝑙 𝑠ℎ𝑜𝑟𝑡𝑛𝑒𝑟 𝑖𝑛 𝑦𝑜𝑢𝑟 𝑔𝑟𝑜𝑢𝑝\n"
-            "• /setshortlinkoff  - 𝑜𝑓𝑓 𝑠ℎ𝑜𝑟𝑡𝑙𝑖𝑛𝑘 𝑖𝑛 𝑦𝑜𝑢𝑟 𝑔𝑟𝑜𝑢𝑝\n"
-            "• /setshortlinkon - 𝑜𝑛 𝑠ℎ𝑜𝑟𝑡𝑙𝑖𝑛𝑘 𝑖𝑛 𝑦𝑜𝑢𝑟 𝑔𝑟𝑜𝑢𝑝\n"
-            "• /shortlink_info - 𝑐ℎ𝑒𝑐𝑘 𝑦𝑜𝑢𝑟 𝑔𝑟𝑜𝑢𝑝 𝑎𝑙𝑙 𝑠ℎ𝑜𝑟𝑡𝑙𝑖𝑛𝑘 𝑎𝑛𝑑 𝑡𝑢𝑡𝑜𝑟𝑖𝑎𝑙 𝑙𝑖𝑛𝑘 𝑑𝑒𝑡𝑎𝑖𝑙𝑠\n"
-            "• /set_tutorial - 𝑠𝑒𝑡 𝑦𝑜𝑢𝑟 𝑢𝑟𝑙 𝑠ℎ𝑜𝑟𝑡𝑛𝑒𝑟 ℎ𝑜𝑤 𝑡𝑜 𝑜𝑝𝑒𝑛 𝑙𝑖𝑛𝑘 𝑢𝑟𝑙\n"
-            "• /remove_tutorial - 𝑟𝑒𝑚𝑜𝑣𝑒 𝑦𝑜𝑢𝑟 𝑡𝑢𝑡𝑜𝑟𝑖𝑎𝑙 𝑢𝑟𝑙\n"
-            "• /fsub - 𝑎𝑑𝑑 𝑓𝑜𝑟𝑐𝑒 𝑠𝑢𝑏𝑠𝑐𝑟𝑖𝑏𝑒 𝑐ℎ𝑎𝑛𝑛𝑒𝑙 𝑖𝑛 𝑔𝑟𝑜𝑢𝑝\n"
-            "• /nofsub - 𝑟𝑒𝑚𝑜𝑣𝑒 𝑜𝑟 𝑜𝑓𝑓 𝑓𝑜𝑟𝑐𝑒 𝑠𝑢𝑏𝑠𝑐𝑟𝑖𝑏𝑒 𝑖𝑛 𝑦𝑜𝑢𝑟 𝑔𝑟𝑜𝑢𝑝\n"
-            "• /rename - 𝑟𝑒𝑛𝑎𝑚𝑒 𝑦𝑜𝑢𝑟 𝑓𝑖𝑙𝑒\n"
-            "• /set_caption - 𝑎𝑑𝑑 𝑐𝑎𝑝𝑡𝑖𝑜𝑛 𝑓𝑜𝑟 𝑦𝑜𝑢𝑟 𝑟𝑒𝑛𝑎𝑚𝑒𝑑 𝑓𝑖𝑙𝑒\n"
-            "• /see_caption - 𝑠𝑒𝑒 𝑦𝑜𝑢𝑟 𝑠𝑎𝑣𝑒𝑑 𝑐𝑎𝑝𝑡𝑖𝑜𝑛\n"
-            "• /del_caption - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑦𝑜𝑢𝑟 𝑠𝑎𝑣𝑒𝑑 𝑐𝑎𝑝𝑡𝑖𝑜𝑛\n"
-            "• /set_thumb - 𝑎𝑑𝑑 𝑡ℎ𝑢𝑚𝑏𝑛𝑎𝑖𝑙 𝑓𝑜𝑟 𝑦𝑜𝑢𝑟 𝑟𝑒𝑛𝑎𝑚𝑒𝑑 𝑓𝑖𝑙𝑒\n"
-            "• /view_thumb - 𝑣𝑖𝑒𝑤 𝑦𝑜𝑢𝑟 𝑠𝑎𝑣𝑒𝑑 𝑡ℎ𝑢𝑚𝑏𝑛𝑎𝑖𝑙\n"
-            "• /del_thumb - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑦𝑜𝑢𝑟 𝑠𝑎𝑣𝑒𝑑 𝑡ℎ𝑢𝑚𝑏𝑛𝑎𝑖𝑙\n"
-            "• /stream - 𝑔𝑒𝑛𝑒𝑟𝑎𝑡𝑒 𝑠𝑡𝑟𝑒𝑎𝑚 𝑎𝑛𝑑 𝑑𝑜𝑤𝑛𝑙𝑜𝑎𝑑 𝑙𝑖nk 𝑜𝑓 𝑦𝑜𝑢𝑟 𝑓𝑖𝑙𝑒\n"
-            "• /telegraph - 𝑔𝑒𝑡 𝑡𝑒𝑙𝑒𝑔𝑟𝑎𝑝ℎ 𝑙𝑖𝑛𝑘 𝑜𝑓 𝑎𝑛𝑦 𝑓𝑖𝑙𝑒 𝑢𝑛𝑑𝑒𝑟 5𝑚𝑏\n"
-            "• /stickerid - 𝑡𝑜 𝑔𝑒𝑡 𝑖𝑑 𝑎𝑛𝑑 𝑢𝑛𝑖𝑞𝑢𝑒 𝐼'𝑑 𝑜𝑓 𝑠𝑡𝑖𝑐𝑘𝑒𝑟\n"
-            "• /font - 𝑡𝑜 𝑔𝑒𝑡 𝑎𝑛𝑦 𝑡𝑦𝑝𝑒 𝑜𝑓 𝑓𝑜𝑛𝑡 𝑜𝑓 𝑎𝑛𝑦 𝑤𝑜𝑟𝑑\n"
-            "• /repo - 𝑔𝑒𝑡 𝑎𝑛𝑦 𝑟𝑒𝑝𝑜 𝑙𝑖𝑛𝑘 𝑏𝑦 𝑠𝑒𝑎𝑟𝑐ℎ𝑖𝑛𝑔\n"
-            "• /purgerequests - 𝑑𝑒𝑙𝑒𝑡𝑒 𝑎𝑙𝑙 𝑗𝑜𝑖𝑛 𝑟𝑒𝑞𝑢𝑒𝑠𝑡𝑠 𝑓𝑟𝑜𝑚 𝑑𝑎𝑡𝑎𝑏𝑎𝑠𝑒\n"
-            "• /totalrequests - 𝑔𝑒𝑡 𝑡𝑜𝑡𝑎𝑙 𝑛𝑢𝑚𝑏𝑒𝑟 𝑜𝑓 𝑗𝑜𝑖𝑛 𝑟𝑒𝑞𝑢𝑒𝑠𝑡 𝑓𝑟𝑜𝑚 𝑑𝑎𝑡𝑎𝑏𝑎𝑠𝑒\n"
-        )
-        await send_and_delete_message(context, query.message.chat.id, help_message)
+        await send_and_delete_message(context, query.message.chat.id, HELP_TEXT, parse_mode="Markdown")
 
     elif data == "start_close":
         await query.message.delete()
@@ -1527,6 +1560,9 @@ def main():
 
     # Callback Query Handler (for buttons)
     app.add_handler(CallbackQueryHandler(button_handler))
+
+    # Group tracking handler
+    app.add_handler(ChatMemberHandler(on_chat_member_update))
 
     logger.info("Bot started...")
     # Start the bot
