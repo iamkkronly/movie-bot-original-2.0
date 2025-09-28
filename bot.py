@@ -78,6 +78,7 @@ MONGO_URIS = [
     "mongodb+srv://4yxduh8_db_user:45Lyw2zgcCUhxTQd@cluster0.afxbyeo.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
     "mongodb+srv://zdqmu6ir_db_user:gNGahCtkshRz0T6i@cluster0.ihuljbb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
 ]
+GROUPS_DB_URI = "mongodb+srv://6p5e2y8_db_user:MxRFLhQ534AI3rfQ@cluster0.j9hcylx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 current_uri_index = 0
 
 mongo_client = None
@@ -808,25 +809,24 @@ async def grp_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TY
 
     broadcast_text = " ".join(context.args)
 
-    # Fetch all unique group IDs from all databases
+    # Fetch all unique group IDs from the dedicated groups database
     all_group_ids = set()
-    logger.info("Fetching all group IDs for group broadcast...")
-    for uri in MONGO_URIS:
-        temp_client = None
-        try:
-            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-            temp_client.admin.command('ismaster')
-            temp_db = temp_client["telegram_files"]
-            temp_groups_col = temp_db["groups"]
+    logger.info("Fetching all group IDs for group broadcast from dedicated DB...")
+    temp_client = None
+    try:
+        temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
+        temp_client.admin.command('ismaster')
+        temp_db = temp_client["telegram_groups"]
+        temp_groups_col = temp_db["groups"]
 
-            group_docs = temp_groups_col.find({}, {"_id": 1})
-            for doc in group_docs:
-                all_group_ids.add(doc['_id'])
-        except Exception as e:
-            logger.error(f"Failed to fetch group IDs from URI {uri[:40]}...: {e}")
-        finally:
-            if temp_client:
-                temp_client.close()
+        group_docs = temp_groups_col.find({}, {"_id": 1})
+        for doc in group_docs:
+            all_group_ids.add(doc['_id'])
+    except Exception as e:
+        logger.error(f"Failed to fetch group IDs from dedicated DB: {e}")
+    finally:
+        if temp_client:
+            temp_client.close()
 
     if not all_group_ids:
         await send_and_delete_message(context, update.effective_chat.id, "❌ No groups found in the database to broadcast to.")
@@ -868,52 +868,37 @@ async def on_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TY
 
         # If the bot was promoted to administrator or is the creator
         if new_status in ["administrator", "creator"]:
-            logger.info(f"Bot was added/promoted as admin in group {group_id}. Saving to database.")
-
-            # Try to save the group ID to the database, cycling through all URIs
-            saved = False
-            for uri in MONGO_URIS:
-                temp_client = None
-                try:
-                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-                    temp_client.admin.command('ismaster')
-                    temp_db = temp_client["telegram_files"]
-                    temp_groups_col = temp_db["groups"]
-
-                    # Use update_one with upsert=True to add/update the group ID
-                    temp_groups_col.update_one({"_id": group_id}, {"$set": {"_id": group_id}}, upsert=True)
-                    saved = True
-                    logger.info(f"Successfully saved/updated group {group_id} in DB using URI: {uri[:40]}...")
-                    break
-                except Exception as e:
-                    logger.error(f"Failed to save group {group_id} with URI {uri[:40]}...: {e}")
-                finally:
-                    if temp_client:
-                        temp_client.close()
-
-            if not saved:
-                logger.error(f"Failed to save group {group_id} to any database.")
+            logger.info(f"Bot was added/promoted as admin in group {group_id}. Saving to dedicated groups database.")
+            temp_client = None
+            try:
+                temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
+                temp_client.admin.command('ismaster')
+                temp_db = temp_client["telegram_groups"]
+                temp_groups_col = temp_db["groups"]
+                temp_groups_col.update_one({"_id": group_id}, {"$set": {"_id": group_id}}, upsert=True)
+                logger.info(f"Successfully saved/updated group {group_id} in dedicated groups DB.")
+            except Exception as e:
+                logger.error(f"Failed to save group {group_id} to dedicated DB: {e}")
+            finally:
+                if temp_client:
+                    temp_client.close()
 
         # If the bot was kicked, left, or demoted from admin
         elif old_status in ["administrator", "creator"] and new_status not in ["administrator", "creator"]:
-            logger.info(f"Bot was removed or demoted from admin in group {group_id}. Removing from database.")
-
-            # Try to remove the group ID from all databases
-            for uri in MONGO_URIS:
-                temp_client = None
-                try:
-                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-                    temp_client.admin.command('ismaster')
-                    temp_db = temp_client["telegram_files"]
-                    temp_groups_col = temp_db["groups"]
-
-                    temp_groups_col.delete_one({"_id": group_id})
-                    logger.info(f"Attempted removal of group {group_id} from DB using URI: {uri[:40]}...")
-                except Exception as e:
-                    logger.error(f"Failed to remove group {group_id} with URI {uri[:40]}...: {e}")
-                finally:
-                    if temp_client:
-                        temp_client.close()
+            logger.info(f"Bot was removed or demoted from admin in group {group_id}. Removing from dedicated groups database.")
+            temp_client = None
+            try:
+                temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
+                temp_client.admin.command('ismaster')
+                temp_db = temp_client["telegram_groups"]
+                temp_groups_col = temp_db["groups"]
+                temp_groups_col.delete_one({"_id": group_id})
+                logger.info(f"Successfully removed group {group_id} from dedicated groups DB.")
+            except Exception as e:
+                logger.error(f"Failed to remove group {group_id} from dedicated DB: {e}")
+            finally:
+                if temp_client:
+                    temp_client.close()
 
 
 # ========================
