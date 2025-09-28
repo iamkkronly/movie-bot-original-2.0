@@ -59,6 +59,7 @@ HELP_TEXT = (
     "• `/unban <user_id>` - Unban a user.\n"
     "• `/broadcast <msg>` - Send a message to all users.\n"
     "• `/grp_broadcast <msg>` - Send a message to all connected groups where the bot is an admin.\n"
+        "• `/index_channel <channel_id> [skip]` - Index files from a channel.\n"
     "• Send a file to me in a private message to index it."
 )
 
@@ -856,6 +857,108 @@ async def grp_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TY
     await send_and_delete_message(context, update.effective_chat.id, f"✅ Group broadcast complete!\n\nSent to: {sent_count} groups\nFailed: {failed_count} groups")
 
 
+async def index_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to index files from a given channel."""
+    if update.effective_user.id not in ADMINS:
+        await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
+        return
+
+    if len(context.args) < 1:
+        await send_and_delete_message(context, update.effective_chat.id, "Usage: /index_channel <channel_id> [skip_messages]")
+        return
+
+    try:
+        channel_id = int(context.args[0])
+    except ValueError:
+        await send_and_delete_message(context, update.effective_chat.id, "❌ Invalid Channel ID. It should be a number.")
+        return
+
+    skip_messages = 0
+    if len(context.args) > 1:
+        try:
+            skip_messages = int(context.args[1])
+        except ValueError:
+            await send_and_delete_message(context, update.effective_chat.id, "❌ Invalid skip count. It should be a number.")
+            return
+
+    # Schedule the indexing task to run in the background
+    asyncio.create_task(index_channel_task(context, channel_id, skip_messages, update.effective_chat.id))
+    await send_and_delete_message(context, update.effective_chat.id, "✅ Indexing has started in the background. I will notify you when it's complete.")
+
+async def index_channel_task(context: ContextTypes.DEFAULT_TYPE, channel_id: int, skip: int, user_chat_id: int):
+    """Background task to handle channel indexing."""
+    last_message_id = 0
+    try:
+        # A bit of a hack to get the last message ID
+        temp_msg = await context.bot.send_message(chat_id=channel_id, text=".")
+        last_message_id = temp_msg.message_id
+        await context.bot.delete_message(chat_id=channel_id, message_id=last_message_id)
+    except Exception as e:
+        logger.error(f"Could not get last message ID for channel {channel_id}: {e}")
+        await send_and_delete_message(context, user_chat_id, f"❌ Failed to access channel {channel_id}. Make sure the bot is an admin there.")
+        return
+
+    indexed_count = 0
+    for i in range(skip + 1, last_message_id):
+        forwarded_message = None
+        try:
+            # Forward the message to the DB_CHANNEL to get a message object with file attributes
+            forwarded_message = await context.bot.forward_message(
+                chat_id=DB_CHANNEL,
+                from_chat_id=channel_id,
+                message_id=i
+            )
+
+            file = forwarded_message.document or forwarded_message.video or forwarded_message.audio
+            if not file:
+                continue
+
+            # Get filename (note: original caption is lost on forward)
+            raw_name = getattr(file, "file_name", None) or getattr(file, "title", None) or file.file_unique_id
+            clean_name = raw_name.replace("_", " ").replace(".", " ").replace("-", " ") if raw_name else "Unknown"
+
+            # Save metadata to all file databases for redundancy
+            saved_to_any_db = False
+            for uri in MONGO_URIS:
+                temp_client = None
+                try:
+                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                    temp_db = temp_client["telegram_files"]
+                    temp_files_col = temp_db["files"]
+                    # THE CRITICAL FIX: Save original message_id and channel_id
+                    temp_files_col.insert_one({
+                        "file_name": clean_name,
+                        "file_id": i, # Original message ID
+                        "channel_id": channel_id, # Original channel ID
+                        "file_size": file.file_size,
+                    })
+                    saved_to_any_db = True
+                except Exception as e:
+                    logger.error(f"DB Error while indexing for URI {uri[:40]}: {e}")
+                finally:
+                    if temp_client:
+                        temp_client.close()
+
+            if saved_to_any_db:
+                indexed_count += 1
+                logger.info(f"Indexed message {i} from channel {channel_id}: {clean_name}")
+
+            # Send progress update every 100 files
+            if indexed_count > 0 and indexed_count % 100 == 0:
+                await send_and_delete_message(context, user_chat_id, f"✅ Progress: Indexed {indexed_count} files so far...")
+
+        except TelegramError as e:
+            logger.warning(f"Could not process message {i} from channel {channel_id}: {e}")
+        except Exception as e:
+            logger.error(f"An unexpected error occurred while indexing message {i}: {e}")
+        finally:
+            # CRITICAL: Delete the temporary forwarded message to keep DB channel clean
+            if forwarded_message:
+                await context.bot.delete_message(chat_id=DB_CHANNEL, message_id=forwarded_message.message_id)
+
+    await send_and_delete_message(context, user_chat_id, f"✅✅ Finished indexing channel {channel_id}. Total files indexed: {indexed_count}.")
+
+
 async def on_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the bot being added to or removed from a group."""
     my_chat_member = update.my_chat_member
@@ -1526,6 +1629,7 @@ def main():
     app.add_handler(CommandHandler("unban", unban_user_command))
     app.add_handler(CommandHandler("broadcast", broadcast_message))
     app.add_handler(CommandHandler("grp_broadcast", grp_broadcast_command))
+    app.add_handler(CommandHandler("index_channel", index_channel_command))
 
     # File and Message Handlers
     # Admin file upload via PM
