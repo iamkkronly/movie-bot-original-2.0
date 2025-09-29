@@ -1627,6 +1627,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await send_and_delete_message(context, user_id, shortened_link)
                 else:
                     await send_and_delete_message(context, user_id, f"Please open this link to get your file:\n{shortened_link}")
+                    # Also notify in the group chat if it's not a private message
+                    if query.message.chat.type != "private":
+                        user_mention = query.from_user.mention_html()
+                        await send_and_delete_message(
+                            context,
+                            query.message.chat.id,
+                            f"✅ {user_mention}, I have sent the file to your private chat. Please check your PM.",
+                            parse_mode="HTML"
+                        )
             else:
                 await send_and_delete_message(context, user_id, "❌ Could not process your request. Please try again later.")
 
@@ -1765,6 +1774,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await send_and_delete_message(context, user_id, shortened_link)
                 else:
                     await send_and_delete_message(context, user_id, f"Please open this link to get all files from this page:\n{shortened_link}")
+                    # Also notify in the group chat if it's not a private message
+                    if query.message.chat.type != "private":
+                        user_mention = query.from_user.mention_html()
+                        await send_and_delete_message(
+                            context,
+                            query.message.chat.id,
+                            f"✅ {user_mention}, I have sent the files to your private chat. Please check your PM.",
+                            parse_mode="HTML"
+                        )
             else:
                 await send_and_delete_message(context, user_id, "❌ Could not process your request. Please try again later.")
 
