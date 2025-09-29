@@ -83,8 +83,9 @@ MONGO_URIS = [
     "mongodb+srv://4yxduh8_db_user:45Lyw2zgcCUhxTQd@cluster0.afxbyeo.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
     "mongodb+srv://zdqmu6ir_db_user:gNGahCtkshRz0T6i@cluster0.ihuljbb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
 ]
-GROUPS_DB_URI = "mongodb+srv://6p5e2y8_db_user:MxRFLhQ534AI3rfQ@cluster0.j9hcylx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-SHORTENER_DB_URI = "mongodb+srv://7eqsiq8_db_user:h6nYmRKbgHJDALUA@cluster0.wuntcv8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+GROUPS_DB_URIS = ["mongodb+srv://6p5e2y8_db_user:MxRFLhQ534AI3rfQ@cluster0.j9hcylx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"]
+VERIFICATION_DB_URIS = ["mongodb+srv://7eqsiq8_db_user:h6nYmRKbgHJDALUA@cluster0.wuntcv8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"]
+VERIFIED_USERS_DB_URIS = ["mongodb+srv://q9amkpx_db_user:xuLc5qUJAJMBCtDH@cluster0.mvwgcxd.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"]
 current_uri_index = 0
 
 mongo_client = None
@@ -197,20 +198,74 @@ async def bot_can_respond(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     return False
 
+async def is_user_verified(user_id: int):
+    """Checks if a user is in the verified list and their verification is not expired."""
+    for uri in VERIFIED_USERS_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            db = temp_client["verified_users_db"]
+            collection = db["verified_users"]
+            if collection.find_one({"_id": user_id}):
+                logger.info(f"User {user_id} is verified.")
+                return True # Found in one DB, that's enough
+        except Exception as e:
+            logger.error(f"Failed to check verification status for user {user_id} at {uri}: {e}")
+            continue
+        finally:
+            if temp_client:
+                temp_client.close()
+    logger.info(f"User {user_id} is not verified.")
+    return False
+
+async def mark_user_as_verified(user_id: int):
+    """Adds a user to the verified list with a 6-hour expiry."""
+    success_count = 0
+    for uri in VERIFIED_USERS_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            db = temp_client["verified_users_db"]
+            collection = db["verified_users"]
+            collection.update_one(
+                {"_id": user_id},
+                {"$set": {"verifiedAt": datetime.datetime.utcnow()}},
+                upsert=True
+            )
+            success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to mark user {user_id} as verified at {uri}: {e}")
+            continue
+        finally:
+            if temp_client:
+                temp_client.close()
+
+    if success_count > 0:
+        logger.info(f"Marked user {user_id} as verified in {success_count}/{len(VERIFIED_USERS_DB_URIS)} DBs.")
+        return True
+    else:
+        logger.error(f"Failed to mark user {user_id} as verified in any DB.")
+        return False
+
 async def get_shortener_config():
-    """Fetches the shortener config from the dedicated database."""
-    temp_client = None
-    try:
-        temp_client = MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_db = temp_client["link_shortener"]
-        config_col = temp_db["config"]
-        return config_col.find_one({"_id": "shortener_config"})
-    except Exception as e:
-        logger.error(f"Failed to get shortener config: {e}")
-        return None
-    finally:
-        if temp_client:
-            temp_client.close()
+    """Fetches the shortener config from the dedicated database, trying all URIs."""
+    for uri in VERIFICATION_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_db = temp_client["verification_db"]
+            config_col = temp_db["config"]
+            config = config_col.find_one({"_id": "shortener_config"})
+            if config:
+                return config  # Return on first success
+        except Exception as e:
+            logger.error(f"Failed to get shortener config from {uri}: {e}")
+            continue  # Try next URI
+        finally:
+            if temp_client:
+                temp_client.close()
+    logger.error("All shortener DB URIs failed.")
+    return None
 
 async def get_shortened_link(url_to_shorten: str):
     """Generates a shortened link using the configured API."""
@@ -242,43 +297,66 @@ async def get_shortened_link(url_to_shorten: str):
         logger.error(f"Failed to get shortened link: {e}")
         return f"Error: Could not shorten link. {e}"
 
-async def save_pending_request(request_data):
-    """Saves a pending file request to the shortener DB."""
-    temp_client = None
-    try:
-        temp_client = MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_db = temp_client["link_shortener"]
-        pending_col = temp_db["pending_requests"]
+async def save_verification_progress(verification_data):
+    """Saves or updates a user's verification progress in all verification DBs."""
+    verification_data['createdAt'] = datetime.datetime.utcnow() # Reset timer on each step
 
-        # Add a timestamp to the request data
-        request_data['timestamp'] = datetime.datetime.utcnow()
+    success_count = 0
+    for uri in VERIFICATION_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            db = temp_client["verification_db"]
+            collection = db["pending_verifications"]
+            collection.update_one(
+                {"_id": verification_data["_id"]},
+                {"$set": verification_data},
+                upsert=True
+            )
+            success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to save verification progress to {uri}: {e}")
+            continue
+        finally:
+            if temp_client:
+                temp_client.close()
 
-        pending_col.insert_one(request_data)
-        return True
-    except Exception as e:
-        logger.error(f"Failed to save pending request: {e}")
-        return False
-    finally:
-        if temp_client:
-            temp_client.close()
+    return success_count > 0
 
-async def get_and_delete_pending_request(request_id: str):
-    """Fetches and deletes a pending request from the shortener DB."""
-    temp_client = None
-    try:
-        temp_client = MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_db = temp_client["link_shortener"]
-        pending_col = temp_db["pending_requests"]
+async def get_verification_progress(verification_id: str):
+    """Fetches a user's verification progress from the first available DB."""
+    for uri in VERIFICATION_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            db = temp_client["verification_db"]
+            collection = db["pending_verifications"]
+            progress = collection.find_one({"_id": verification_id})
+            if progress:
+                return progress
+        except Exception as e:
+            logger.error(f"Failed to get verification progress from {uri}: {e}")
+            continue
+        finally:
+            if temp_client:
+                temp_client.close()
+    return None
 
-        # Find and delete the document in one atomic operation
-        request_data = pending_col.find_one_and_delete({"_id": request_id})
-        return request_data
-    except Exception as e:
-        logger.error(f"Failed to get/delete pending request {request_id}: {e}")
-        return None
-    finally:
-        if temp_client:
-            temp_client.close()
+async def delete_verification_progress(verification_id: str):
+    """Deletes a verification record from all DBs upon completion or failure."""
+    for uri in VERIFICATION_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            db = temp_client["verification_db"]
+            collection = db["pending_verifications"]
+            collection.delete_one({"_id": verification_id})
+        except Exception as e:
+            logger.error(f"Failed to delete verification progress from {uri}: {e}")
+            continue
+        finally:
+            if temp_client:
+                temp_client.close()
 
 
 async def send_and_delete_message(
@@ -468,7 +546,95 @@ async def send_all_files_task(query, context, file_list):
 # COMMAND HANDLERS
 # ========================
 
+async def handle_verification_step(update: Update, context: ContextTypes.DEFAULT_TYPE, verification_id: str):
+    """Handles a user clicking a verification deep link."""
+    user = update.effective_user
+    progress = await get_verification_progress(verification_id)
+
+    if not progress:
+        await send_and_delete_message(context, user.id, "❌ This verification link is invalid or has expired. Please start over by requesting a file again.")
+        return
+
+    if progress.get("user_id") != user.id:
+        await send_and_delete_message(context, user.id, "❌ This verification link is not for you.")
+        return
+
+    current_step = progress.get("step", 1)
+    next_step = current_step + 1
+
+    if next_step <= 3:
+        # Continue to the next step
+        progress['step'] = next_step
+        if await save_verification_progress(progress):
+            bot_username = context.bot.username
+            deep_link = f"https://t.me/{bot_username}?start={verification_id}"
+            shortened_link = await get_shortened_link(deep_link)
+
+            if "Error:" in shortened_link:
+                await send_and_delete_message(context, user.id, shortened_link)
+            else:
+                await send_and_delete_message(
+                    context,
+                    user.id,
+                    f"✅ Step {current_step} complete!\n\n"
+                    f"Step {next_step} of 3: Please open this link to continue:\n{shortened_link}"
+                )
+        else:
+            await send_and_delete_message(context, user.id, "❌ Could not save your verification progress. Please try again.")
+
+    else:
+        # Verification complete
+        await send_and_delete_message(context, user.id, "✅ Verification successful! You now have access for 6 hours. Sending your requested file(s)...")
+        await mark_user_as_verified(user.id)
+
+        # Deliver the originally requested file(s)
+        original_request = progress.get("original_request")
+        if original_request:
+            # Mock a query object to pass to the sending tasks
+            class MockQuery:
+                def __init__(self, user, message):
+                    self.from_user = user
+                    self.message = message
+            mock_query = MockQuery(user, update.message)
+
+            if original_request.get("type") == "single":
+                file_id = original_request.get("file_id")
+                file_data = None
+                for uri in MONGO_URIS:
+                    try:
+                        client = MongoClient(uri, serverSelectionTimeoutMS=2000)
+                        db = client["telegram_files"]
+                        file_data = db["files"].find_one({"_id": ObjectId(file_id)})
+                        client.close()
+                        if file_data: break
+                    except Exception: continue
+
+                if file_data:
+                    await send_file_task(mock_query, context, file_data)
+                else:
+                    await send_and_delete_message(context, user.id, "❌ The originally requested file could not be found.")
+
+            elif original_request.get("type") == "batch":
+                file_ids = [ObjectId(fid) for fid in original_request.get("file_ids", [])]
+                files_to_send = []
+                for uri in MONGO_URIS:
+                    try:
+                        client = MongoClient(uri, serverSelectionTimeoutMS=2000)
+                        db = client["telegram_files"]
+                        files_to_send.extend(list(db["files"].find({"_id": {"$in": file_ids}})))
+                        client.close()
+                    except Exception: continue
+
+                if files_to_send:
+                    await send_all_files_task(mock_query, context, files_to_send)
+                else:
+                    await send_and_delete_message(context, user.id, "❌ The originally requested files could not be found.")
+
+        # Clean up the verification progress from the database
+        await delete_verification_progress(verification_id)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the /start command, including verification deep links."""
     if not await bot_can_respond(update, context):
         return
     if await is_banned(update.effective_user.id):
@@ -477,66 +643,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await save_user_info(update.effective_user)
     user = update.effective_user
 
-    # Deep linking logic
+    # Handle deep links for the verification process
     if context.args:
-        request_id = context.args[0]
-        request_data = await get_and_delete_pending_request(request_id)
-
-        if not request_data:
-            await send_and_delete_message(context, user.id, "❌ Invalid or expired link. Please request the file again.")
-            return
-
-        if request_data.get("user_id") != user.id:
-            await send_and_delete_message(context, user.id, "❌ This link is not for you.")
-            return
-
-        # Mock a query object to pass to the sending tasks
-        class MockQuery:
-            def __init__(self, user, message):
-                self.from_user = user
-                self.message = message
-
-        mock_query = MockQuery(user, update.message)
-
-        if request_data.get("type") == "single":
-            file_id = request_data.get("file_id")
-            file_data = None
-            for uri in MONGO_URIS:
-                # Simplified fetch logic for example
-                try:
-                    client = MongoClient(uri, serverSelectionTimeoutMS=2000)
-                    db = client["telegram_files"]
-                    file_data = db["files"].find_one({"_id": ObjectId(file_id)})
-                    client.close()
-                    if file_data: break
-                except Exception: continue
-
-            if file_data:
-                await send_file_task(mock_query, context, file_data)
-            else:
-                await send_and_delete_message(context, user.id, "❌ File not found, it may have been deleted.")
-
-        elif request_data.get("type") == "batch":
-            file_ids = [ObjectId(fid) for fid in request_data.get("file_ids", [])]
-            files_to_send = []
-            for uri in MONGO_URIS:
-                # Simplified fetch logic
-                try:
-                    client = MongoClient(uri, serverSelectionTimeoutMS=2000)
-                    db = client["telegram_files"]
-                    files_to_send.extend(list(db["files"].find({"_id": {"$in": file_ids}})))
-                    client.close()
-                except Exception: continue
-
-            if files_to_send:
-                await send_all_files_task(mock_query, context, files_to_send)
-            else:
-                await send_and_delete_message(context, user.id, "❌ One or more files could not be found.")
+        verification_id = context.args[0]
+        # It's a verification link, handle it
+        await handle_verification_step(update, context, verification_id)
         return
 
-    # Standard start message
+    # Standard start message if no deep link
     bot_username = context.bot.username
-    # Assuming the first admin in the list is the owner
     owner_id = ADMINS[0] if ADMINS else None
 
     welcome_text = (
@@ -968,24 +1083,24 @@ async def grp_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TY
 
     broadcast_text = " ".join(context.args)
 
-    # Fetch all unique group IDs from the dedicated groups database
+    # Fetch all unique group IDs from all configured groups databases
     all_group_ids = set()
-    logger.info("Fetching all group IDs for group broadcast from dedicated DB...")
-    temp_client = None
-    try:
-        temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_client.admin.command('ismaster')
-        temp_db = temp_client["telegram_groups"]
-        temp_groups_col = temp_db["groups"]
+    logger.info("Fetching all group IDs for group broadcast from all group DBs...")
+    for uri in GROUPS_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_db = temp_client["telegram_groups"]
+            temp_groups_col = temp_db["groups"]
 
-        group_docs = temp_groups_col.find({}, {"_id": 1})
-        for doc in group_docs:
-            all_group_ids.add(doc['_id'])
-    except Exception as e:
-        logger.error(f"Failed to fetch group IDs from dedicated DB: {e}")
-    finally:
-        if temp_client:
-            temp_client.close()
+            group_docs = temp_groups_col.find({}, {"_id": 1})
+            for doc in group_docs:
+                all_group_ids.add(doc['_id'])
+        except Exception as e:
+            logger.error(f"Failed to fetch group IDs from {uri}: {e}")
+        finally:
+            if temp_client:
+                temp_client.close()
 
     if not all_group_ids:
         await send_and_delete_message(context, update.effective_chat.id, "❌ No groups found in the database to broadcast to.")
@@ -1044,7 +1159,7 @@ async def index_channel_command(update: Update, context: ContextTypes.DEFAULT_TY
     await send_and_delete_message(context, update.effective_chat.id, "✅ Indexing has started in the background. I will notify you when it's complete.")
 
 async def addlinkshort_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to set the link shortener API details."""
+    """Admin command to set the link shortener API details on all verification DBs."""
     if update.effective_user.id not in ADMINS:
         await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
@@ -1056,25 +1171,28 @@ async def addlinkshort_command(update: Update, context: ContextTypes.DEFAULT_TYP
     api_url = context.args[0]
     api_key = context.args[1]
 
-    temp_client = None
-    try:
-        temp_client = MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_db = temp_client["link_shortener"]
-        config_col = temp_db["config"]
+    success_count = 0
+    for uri in VERIFICATION_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_db = temp_client["verification_db"]
+            config_col = temp_db["config"]
 
-        # Store the config as a single document
-        config_col.update_one(
-            {"_id": "shortener_config"},
-            {"$set": {"api_url": api_url, "api_key": api_key}},
-            upsert=True
-        )
-        await send_and_delete_message(context, update.effective_chat.id, "✅ Link shortener details have been saved successfully.")
-    except Exception as e:
-        logger.error(f"Failed to save shortener config: {e}")
-        await send_and_delete_message(context, update.effective_chat.id, f"❌ Failed to save shortener details. Error: {e}")
-    finally:
-        if temp_client:
-            temp_client.close()
+            # Store the config as a single document
+            config_col.update_one(
+                {"_id": "shortener_config"},
+                {"$set": {"api_url": api_url, "api_key": api_key}},
+                upsert=True
+            )
+            success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to save shortener config to {uri}: {e}")
+        finally:
+            if temp_client:
+                temp_client.close()
+
+    await send_and_delete_message(context, update.effective_chat.id, f"✅ Link shortener details saved to {success_count}/{len(VERIFICATION_DB_URIS)} databases.")
 
 
 async def index_channel_task(context: ContextTypes.DEFAULT_TYPE, channel_id: int, skip: int, user_chat_id: int):
@@ -1163,37 +1281,37 @@ async def on_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TY
 
         # If the bot was promoted to administrator or is the creator
         if new_status in ["administrator", "creator"]:
-            logger.info(f"Bot was added/promoted as admin in group {group_id}. Saving to dedicated groups database.")
-            temp_client = None
-            try:
-                temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
-                temp_client.admin.command('ismaster')
-                temp_db = temp_client["telegram_groups"]
-                temp_groups_col = temp_db["groups"]
-                temp_groups_col.update_one({"_id": group_id}, {"$set": {"_id": group_id}}, upsert=True)
-                logger.info(f"Successfully saved/updated group {group_id} in dedicated groups DB.")
-            except Exception as e:
-                logger.error(f"Failed to save group {group_id} to dedicated DB: {e}")
-            finally:
-                if temp_client:
-                    temp_client.close()
+            logger.info(f"Bot was added/promoted as admin in group {group_id}. Saving to all groups databases.")
+            for uri in GROUPS_DB_URIS:
+                temp_client = None
+                try:
+                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                    temp_db = temp_client["telegram_groups"]
+                    temp_groups_col = temp_db["groups"]
+                    temp_groups_col.update_one({"_id": group_id}, {"$set": {"_id": group_id}}, upsert=True)
+                    logger.info(f"Successfully saved/updated group {group_id} in groups DB at {uri}.")
+                except Exception as e:
+                    logger.error(f"Failed to save group {group_id} to groups DB at {uri}: {e}")
+                finally:
+                    if temp_client:
+                        temp_client.close()
 
         # If the bot was kicked, left, or demoted from admin
         elif old_status in ["administrator", "creator"] and new_status not in ["administrator", "creator"]:
-            logger.info(f"Bot was removed or demoted from admin in group {group_id}. Removing from dedicated groups database.")
-            temp_client = None
-            try:
-                temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
-                temp_client.admin.command('ismaster')
-                temp_db = temp_client["telegram_groups"]
-                temp_groups_col = temp_db["groups"]
-                temp_groups_col.delete_one({"_id": group_id})
-                logger.info(f"Successfully removed group {group_id} from dedicated groups DB.")
-            except Exception as e:
-                logger.error(f"Failed to remove group {group_id} from dedicated DB: {e}")
-            finally:
-                if temp_client:
-                    temp_client.close()
+            logger.info(f"Bot was removed or demoted from admin in group {group_id}. Removing from all groups databases.")
+            for uri in GROUPS_DB_URIS:
+                temp_client = None
+                try:
+                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                    temp_db = temp_client["telegram_groups"]
+                    temp_groups_col = temp_db["groups"]
+                    temp_groups_col.delete_one({"_id": group_id})
+                    logger.info(f"Successfully removed group {group_id} from groups DB at {uri}.")
+                except Exception as e:
+                    logger.error(f"Failed to remove group {group_id} from groups DB at {uri}: {e}")
+                finally:
+                    if temp_client:
+                        temp_client.close()
 
 
 # ========================
@@ -1563,9 +1681,46 @@ async def send_results_page(chat_id, results, page, context: ContextTypes.DEFAUL
         logger.error(f"Error sending/editing search results page: {e}")
 
 
+async def start_verification_process(context: ContextTypes.DEFAULT_TYPE, query: Update.callback_query, original_request: dict):
+    """
+    Starts the 3-step verification process for a user.
+    `original_request` should contain the file request details.
+    """
+    user_id = query.from_user.id
+    chat_id = query.message.chat.id
+
+    verification_id = str(uuid.uuid4())
+    progress_data = {
+        "_id": verification_id,
+        "user_id": user_id,
+        "step": 1,
+        "original_request": original_request
+    }
+
+    if await save_verification_progress(progress_data):
+        bot_username = context.bot.username
+        deep_link = f"https://t.me/{bot_username}?start={verification_id}"
+
+        shortened_link = await get_shortened_link(deep_link)
+
+        if "Error:" in shortened_link:
+            await send_and_delete_message(context, user_id, shortened_link)
+        else:
+            # Send the first link to the user's private chat
+            await send_and_delete_message(
+                context,
+                user_id,
+                f"Please complete the 3-step verification to get 6-hour access to all files.\n\n"
+                f"Step 1 of 3: Open this link to continue:\n{shortened_link}"
+            )
+            # Notify in group if the request came from a group
+            if chat_id != user_id:
+                 await send_and_delete_message(context, query.message.chat.id, f"✅ {query.from_user.mention_html()}, please complete the verification in my private chat to get your file.", parse_mode="HTML")
+    else:
+        await send_and_delete_message(context, user_id, "❌ Could not start the verification process. Please try again later.")
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button clicks"""
-    # Provide an immediate answer to the callback query to clear the loading state on the button
+    """Handle button clicks with new verification flow."""
     query = update.callback_query
     await query.answer()
 
@@ -1581,7 +1736,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Join Channel: @filestore4u", url="https://t.me/filestore4u")],
             [InlineKeyboardButton("Join Channel: @code_boost", url="https://t.me/code_boost")],
-            [InlineKeyboardButton("Join Channel: @krbook_official", url="https://tme/krbook_official")]
+            [InlineKeyboardButton("Join Channel: @krbook_official", url="https://t.me/krbook_official")]
         ])
         await send_and_delete_message(context, query.message.chat.id, "❌ You must join ALL our channels to use this bot!", reply_markup=keyboard)
         return
@@ -1589,184 +1744,115 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
 
-    if data.startswith("get_"):
-        file_id_str = data.split("_", 1)[1]
+    # --- File Request Logic (get_ or sendall_) ---
+    if data.startswith("get_") or data.startswith("sendall_"):
+        is_verified = await is_user_verified(user_id)
 
-        if user_id in ADMINS:
-            # Admin flow: send file directly
-            await send_and_delete_message(context, query.message.chat.id, "⌛ Processing your request as an admin...")
-            file_data = None
-            for uri in MONGO_URIS:
-                temp_client = None
-                try:
-                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-                    temp_db = temp_client["telegram_files"]
-                    temp_files_col = temp_db["files"]
-                    file_data = temp_files_col.find_one({"_id": ObjectId(file_id_str)})
-                    if file_data: break
-                except Exception as e:
-                    logger.error(f"DB Error while admin fetching file {file_id_str}: {e}")
-                finally:
-                    if temp_client: temp_client.close()
-
-            if file_data:
-                asyncio.create_task(send_file_task(query, context, file_data))
+        # Admins and already verified users get files directly
+        if user_id in ADMINS or is_verified:
+            if user_id in ADMINS:
+                await send_and_delete_message(context, query.message.chat.id, "⌛ Processing your request as an admin...")
             else:
-                await send_and_delete_message(context, user_id, "❌ File not found.")
-        else:
-            # Non-admin flow: send shortened link
-            request_id = str(uuid.uuid4())
-            request_data = {"_id": request_id, "user_id": user_id, "type": "single", "file_id": file_id_str}
+                 await send_and_delete_message(context, query.message.chat.id, "✅ You are already verified. Sending your file(s)...")
 
-            if await save_pending_request(request_data):
-                bot_username = context.bot.username
-                deep_link = f"https://t.me/{bot_username}?start={request_id}"
-                shortened_link = await get_shortened_link(deep_link)
+            # --- Send Single File ---
+            if data.startswith("get_"):
+                file_id_str = data.split("_", 1)[1]
+                file_data = None
+                for uri in MONGO_URIS:
+                    temp_client = None
+                    try:
+                        temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                        temp_db = temp_client["telegram_files"]
+                        temp_files_col = temp_db["files"]
+                        file_data = temp_files_col.find_one({"_id": ObjectId(file_id_str)})
+                        if file_data: break
+                    except Exception as e:
+                        logger.error(f"DB Error while fetching file {file_id_str} for verified user: {e}")
+                    finally:
+                        if temp_client: temp_client.close()
 
-                if "Error:" in shortened_link:
-                    await send_and_delete_message(context, user_id, shortened_link)
+                if file_data:
+                    asyncio.create_task(send_file_task(query, context, file_data))
                 else:
-                    await send_and_delete_message(context, user_id, f"Please open this link to get your file:\n{shortened_link}")
-            else:
-                await send_and_delete_message(context, user_id, "❌ Could not process your request. Please try again later.")
+                    await send_and_delete_message(context, user_id, "❌ File not found.")
 
+            # --- Send All Files (Batch) ---
+            elif data.startswith("sendall_"):
+                _, page_str, search_query = data.split("_", 2)
+                page = int(page_str)
+                final_results = context.user_data.get('search_results')
+                if not final_results:
+                    await send_and_delete_message(context, user_id, "❌ Search session expired. Please search again.")
+                    return
+                files_to_send = final_results[page * 10:(page + 1) * 10]
+                if not files_to_send:
+                    await send_and_delete_message(context, user_id, "❌ No files found on this page to send.")
+                    return
+
+                asyncio.create_task(send_all_files_task(query, context, files_to_send))
+            return
+
+        # --- Start Verification for Non-Admin/Non-Verified Users ---
+        else:
+            original_request = {}
+            if data.startswith("get_"):
+                file_id_str = data.split("_", 1)[1]
+                original_request = {"type": "single", "file_id": file_id_str}
+            elif data.startswith("sendall_"):
+                _, page_str, search_query = data.split("_", 2)
+                page = int(page_str)
+                final_results = context.user_data.get('search_results')
+                if not final_results:
+                    await send_and_delete_message(context, user_id, "❌ Search session expired. Please search again.")
+                    return
+                files_to_send = final_results[page * 10:(page + 1) * 10]
+                if not files_to_send:
+                    await send_and_delete_message(context, user_id, "❌ No files found on this page to send.")
+                    return
+                file_ids = [str(file['_id']) for file in files_to_send]
+                original_request = {"type": "batch", "file_ids": file_ids}
+
+            await start_verification_process(context, query, original_request)
+        return
+
+    # --- Other Button Logic (Pagination, Start Menu, etc.) ---
     elif data.startswith("page_"):
-        # This handles both 'Prev' and 'Next' clicks
         _, page_str, search_query = data.split("_", 2)
         page = int(page_str)
-
-        # Cancel the previous deletion task
         if 'last_search_message' in context.chat_data:
             old_task = context.chat_data['last_search_message'].get('deletion_task')
             if old_task and not old_task.done():
                 old_task.cancel()
-                logger.info(f"Cancelled deletion task for message {context.chat_data['last_search_message']['message_id']}")
-
-        # Retrieve search results from user_data
         final_results = context.user_data.get('search_results')
-
         if not final_results:
-            # Re-run the search if results are lost (e.g., bot restarted or context cleared)
-            await send_and_delete_message(context, query.message.chat.id, "⚠️ Search results lost. Re-running search...")
-
-            # This logic is copied from the search_files function for recovery purposes
-            normalized_query = search_query.replace("_", " ").replace(".", " ").replace("-", " ").strip()
-            words = [re.escape(word) for word in normalized_query.split() if len(word) > 1]
-            if not words:
-                await send_and_delete_message(context, query.message.chat.id, "❌ Query too short or invalid.")
-                return
-
-            regex_pattern = re.compile("|".join(words), re.IGNORECASE)
-            query_filter = {"file_name": {"$regex": regex_pattern}}
-            preliminary_results = []
-
-            for uri in MONGO_URIS:
-                temp_client = None
-                try:
-                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-                    temp_client.admin.command('ismaster')
-                    temp_db = temp_client["telegram_files"]
-                    temp_files_col = temp_db["files"]
-                    results = list(temp_files_col.find(query_filter))
-                    preliminary_results.extend(results)
-                except Exception as e:
-                    logger.error(f"MongoDB search query failed during recovery: {e}")
-                finally:
-                    if temp_client:
-                        temp_client.close()
-
-            results_with_score = []
-            unique_files = set()
-            for file in preliminary_results:
-                file_key = (file.get('file_id'), file.get('channel_id'))
-                if file_key in unique_files: continue
-                score = fuzz.token_set_ratio(normalized_query, file['file_name'])
-                if score > 40:
-                    results_with_score.append((file, score))
-                    unique_files.add(file_key)
-
-            sorted_results = sorted(results_with_score, key=lambda x: x[1], reverse=True)
-            final_results = [result[0] for result in sorted_results[:50]]
-
-            if not final_results:
-                await send_and_delete_message(context, query.message.chat.id, "❌ No relevant files found after recovery.")
-                return
-
-            # Save recovered results
-            context.user_data['search_results'] = final_results
-            context.user_data['search_query'] = search_query
-
-        # Edit the existing message
+            await send_and_delete_message(context, query.message.chat.id, "⚠️ Search results have expired. Please search again.")
+            return
         await send_results_page(
             query.message.chat.id,
             final_results,
             page,
             context,
             search_query,
-            message_id=query.message.message_id, # Pass the ID of the message to be edited
-            new_message=False # Explicitly state this is an edit
+            message_id=query.message.message_id,
+            new_message=False
         )
-
-        # Schedule a new deletion task for the edited message
         new_deletion_task = asyncio.create_task(delete_message_after_delay(context, query.message.chat.id, query.message.message_id, 5 * 60))
-        context.chat_data['last_search_message'] = {
-            'message_id': query.message.message_id,
-            'deletion_task': new_deletion_task
-        }
+        context.chat_data['last_search_message']['deletion_task'] = new_deletion_task
 
     elif data == "start_about":
         await query.message.delete()
-        info_message = (
-            "**About this Bot**\n\n"
-            "This bot helps you find and share files on Telegram.\n"
-            "• Developed by Kaustav Ray."
-        )
-        await send_and_delete_message(context, query.message.chat.id, info_message, parse_mode="Markdown")
+        await info_command(update, context)
 
     elif data == "start_help":
         await query.message.delete()
-        await send_and_delete_message(context, query.message.chat.id, HELP_TEXT, parse_mode="Markdown")
+        await help_command(update, context)
 
     elif data == "start_close":
         await query.message.delete()
+
     elif data == "no_owner":
         await query.answer("Owner not configured.", show_alert=True)
-
-    elif data.startswith("sendall_"):
-        _, page_str, search_query = data.split("_", 2)
-        page = int(page_str)
-        final_results = context.user_data.get('search_results')
-
-        if not final_results:
-            await send_and_delete_message(context, user_id, "❌ Search session expired. Please search again.")
-            return
-
-        files_to_send = final_results[page * 10:(page + 1) * 10]
-        if not files_to_send:
-            await send_and_delete_message(context, user_id, "❌ No files found on this page to send.")
-            return
-
-        if user_id in ADMINS:
-            # Admin flow: send files directly
-            await send_and_delete_message(context, user_id, "📨 Sending all files on the current page as an admin...")
-            asyncio.create_task(send_all_files_task(query, context, files_to_send))
-        else:
-            # Non-admin flow: send shortened link for a batch of files
-            request_id = str(uuid.uuid4())
-            file_ids = [str(file['_id']) for file in files_to_send]
-            request_data = {"_id": request_id, "user_id": user_id, "type": "batch", "file_ids": file_ids}
-
-            if await save_pending_request(request_data):
-                bot_username = context.bot.username
-                deep_link = f"https://t.me/{bot_username}?start={request_id}"
-                shortened_link = await get_shortened_link(deep_link)
-
-                if "Error:" in shortened_link:
-                    await send_and_delete_message(context, user_id, shortened_link)
-                else:
-                    await send_and_delete_message(context, user_id, f"Please open this link to get all files from this page:\n{shortened_link}")
-            else:
-                await send_and_delete_message(context, user_id, "❌ Could not process your request. Please try again later.")
 
 
 # ========================
@@ -1777,6 +1863,29 @@ def main():
     if not connect_to_mongo():
         logger.critical("Failed to connect to the initial MongoDB URI. Exiting.")
         return
+
+    # Create TTL index for pending verifications (24-hour expiry)
+    for uri in VERIFICATION_DB_URIS:
+        try:
+            with MongoClient(uri, serverSelectionTimeoutMS=5000) as client:
+                db = client["verification_db"]
+                collection = db["pending_verifications"]
+                collection.create_index("createdAt", expireAfterSeconds=86400) # 24 hours
+                logger.info(f"TTL index on 'pending_verifications' collection ensured for URI: {uri}")
+        except Exception as e:
+            logger.error(f"Could not create TTL index for pending verifications at {uri}: {e}")
+
+    # Create TTL index for verified users (6-hour expiry)
+    for uri in VERIFIED_USERS_DB_URIS:
+        try:
+            with MongoClient(uri, serverSelectionTimeoutMS=5000) as client:
+                db = client["verified_users_db"]
+                collection = db["verified_users"]
+                collection.create_index("verifiedAt", expireAfterSeconds=21600) # 6 hours
+                logger.info(f"TTL index on 'verified_users' collection ensured for URI: {uri}")
+        except Exception as e:
+            logger.error(f"Could not create TTL index for verified users at {uri}: {e}")
+
 
     app = Application.builder().token(BOT_TOKEN).build()
 
