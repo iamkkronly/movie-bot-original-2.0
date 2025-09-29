@@ -83,8 +83,8 @@ MONGO_URIS = [
     "mongodb+srv://4yxduh8_db_user:45Lyw2zgcCUhxTQd@cluster0.afxbyeo.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
     "mongodb+srv://zdqmu6ir_db_user:gNGahCtkshRz0T6i@cluster0.ihuljbb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
 ]
-GROUPS_DB_URI = "mongodb+srv://6p5e2y8_db_user:MxRFLhQ534AI3rfQ@cluster0.j9hcylx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-SHORTENER_DB_URI = "mongodb+srv://7eqsiq8_db_user:h6nYmRKbgHJDALUA@cluster0.wuntcv8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+GROUPS_DB_URIS = ["mongodb+srv://6p5e2y8_db_user:MxRFLhQ534AI3rfQ@cluster0.j9hcylx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"]
+SHORTENER_DB_URIS = ["mongodb+srv://7eqsiq8_db_user:h6nYmRKbgHJDALUA@cluster0.wuntcv8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"]
 current_uri_index = 0
 
 mongo_client = None
@@ -198,19 +198,24 @@ async def bot_can_respond(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return False
 
 async def get_shortener_config():
-    """Fetches the shortener config from the dedicated database."""
-    temp_client = None
-    try:
-        temp_client = MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_db = temp_client["link_shortener"]
-        config_col = temp_db["config"]
-        return config_col.find_one({"_id": "shortener_config"})
-    except Exception as e:
-        logger.error(f"Failed to get shortener config: {e}")
-        return None
-    finally:
-        if temp_client:
-            temp_client.close()
+    """Fetches the shortener config from the dedicated database, trying all URIs."""
+    for uri in SHORTENER_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_db = temp_client["link_shortener"]
+            config_col = temp_db["config"]
+            config = config_col.find_one({"_id": "shortener_config"})
+            if config:
+                return config  # Return on first success
+        except Exception as e:
+            logger.error(f"Failed to get shortener config from {uri}: {e}")
+            continue  # Try next URI
+        finally:
+            if temp_client:
+                temp_client.close()
+    logger.error("All shortener DB URIs failed.")
+    return None
 
 async def get_shortened_link(url_to_shorten: str):
     """Generates a shortened link using the configured API."""
@@ -243,42 +248,62 @@ async def get_shortened_link(url_to_shorten: str):
         return f"Error: Could not shorten link. {e}"
 
 async def save_pending_request(request_data):
-    """Saves a pending file request to the shortener DB."""
-    temp_client = None
-    try:
-        temp_client = MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_db = temp_client["link_shortener"]
-        pending_col = temp_db["pending_requests"]
+    """Saves a pending file request to all shortener DBs for redundancy."""
+    # Add a 'createdAt' timestamp for the TTL index
+    request_data['createdAt'] = datetime.datetime.utcnow()
 
-        # Add a 'createdAt' timestamp for the TTL index
-        request_data['createdAt'] = datetime.datetime.utcnow()
+    success_count = 0
+    for uri in SHORTENER_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_db = temp_client["link_shortener"]
+            pending_col = temp_db["pending_requests"]
+            pending_col.insert_one(request_data)
+            success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to save pending request to {uri}: {e}")
+            continue
+        finally:
+            if temp_client:
+                temp_client.close()
 
-        pending_col.insert_one(request_data)
+    if success_count > 0:
+        logger.info(f"Saved pending request to {success_count}/{len(SHORTENER_DB_URIS)} shortener DBs.")
         return True
-    except Exception as e:
-        logger.error(f"Failed to save pending request: {e}")
+    else:
+        logger.error("Failed to save pending request to any shortener DB.")
         return False
-    finally:
-        if temp_client:
-            temp_client.close()
 
 async def get_and_delete_pending_request(request_id: str):
-    """Fetches and deletes a pending request from the shortener DB."""
-    temp_client = None
-    try:
-        temp_client = MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_db = temp_client["link_shortener"]
-        pending_col = temp_db["pending_requests"]
+    """Fetches and deletes a pending request from the shortener DBs, trying all URIs."""
+    request_data = None
+    for uri in SHORTENER_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_db = temp_client["link_shortener"]
+            pending_col = temp_db["pending_requests"]
 
-        # Find and delete the document in one atomic operation
-        request_data = pending_col.find_one_and_delete({"_id": request_id})
-        return request_data
-    except Exception as e:
-        logger.error(f"Failed to get/delete pending request {request_id}: {e}")
-        return None
-    finally:
-        if temp_client:
-            temp_client.close()
+            # Find and delete the document
+            found_doc = pending_col.find_one_and_delete({"_id": request_id})
+
+            # If we find the document, we store it but continue the loop
+            # to delete it from any other replica DBs.
+            if found_doc and request_data is None:
+                request_data = found_doc
+
+        except Exception as e:
+            logger.error(f"Failed to get/delete pending request {request_id} from {uri}: {e}")
+            continue
+        finally:
+            if temp_client:
+                temp_client.close()
+
+    if not request_data:
+        logger.warning(f"Pending request {request_id} not found in any shortener DB.")
+
+    return request_data
 
 
 async def send_and_delete_message(
@@ -968,24 +993,24 @@ async def grp_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TY
 
     broadcast_text = " ".join(context.args)
 
-    # Fetch all unique group IDs from the dedicated groups database
+    # Fetch all unique group IDs from all configured groups databases
     all_group_ids = set()
-    logger.info("Fetching all group IDs for group broadcast from dedicated DB...")
-    temp_client = None
-    try:
-        temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_client.admin.command('ismaster')
-        temp_db = temp_client["telegram_groups"]
-        temp_groups_col = temp_db["groups"]
+    logger.info("Fetching all group IDs for group broadcast from all group DBs...")
+    for uri in GROUPS_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_db = temp_client["telegram_groups"]
+            temp_groups_col = temp_db["groups"]
 
-        group_docs = temp_groups_col.find({}, {"_id": 1})
-        for doc in group_docs:
-            all_group_ids.add(doc['_id'])
-    except Exception as e:
-        logger.error(f"Failed to fetch group IDs from dedicated DB: {e}")
-    finally:
-        if temp_client:
-            temp_client.close()
+            group_docs = temp_groups_col.find({}, {"_id": 1})
+            for doc in group_docs:
+                all_group_ids.add(doc['_id'])
+        except Exception as e:
+            logger.error(f"Failed to fetch group IDs from {uri}: {e}")
+        finally:
+            if temp_client:
+                temp_client.close()
 
     if not all_group_ids:
         await send_and_delete_message(context, update.effective_chat.id, "❌ No groups found in the database to broadcast to.")
@@ -1044,7 +1069,7 @@ async def index_channel_command(update: Update, context: ContextTypes.DEFAULT_TY
     await send_and_delete_message(context, update.effective_chat.id, "✅ Indexing has started in the background. I will notify you when it's complete.")
 
 async def addlinkshort_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to set the link shortener API details."""
+    """Admin command to set the link shortener API details on all shortener DBs."""
     if update.effective_user.id not in ADMINS:
         await send_and_delete_message(context, update.effective_chat.id, "❌ You do not have permission to use this command.")
         return
@@ -1056,25 +1081,28 @@ async def addlinkshort_command(update: Update, context: ContextTypes.DEFAULT_TYP
     api_url = context.args[0]
     api_key = context.args[1]
 
-    temp_client = None
-    try:
-        temp_client = MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000)
-        temp_db = temp_client["link_shortener"]
-        config_col = temp_db["config"]
+    success_count = 0
+    for uri in SHORTENER_DB_URIS:
+        temp_client = None
+        try:
+            temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+            temp_db = temp_client["link_shortener"]
+            config_col = temp_db["config"]
 
-        # Store the config as a single document
-        config_col.update_one(
-            {"_id": "shortener_config"},
-            {"$set": {"api_url": api_url, "api_key": api_key}},
-            upsert=True
-        )
-        await send_and_delete_message(context, update.effective_chat.id, "✅ Link shortener details have been saved successfully.")
-    except Exception as e:
-        logger.error(f"Failed to save shortener config: {e}")
-        await send_and_delete_message(context, update.effective_chat.id, f"❌ Failed to save shortener details. Error: {e}")
-    finally:
-        if temp_client:
-            temp_client.close()
+            # Store the config as a single document
+            config_col.update_one(
+                {"_id": "shortener_config"},
+                {"$set": {"api_url": api_url, "api_key": api_key}},
+                upsert=True
+            )
+            success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to save shortener config to {uri}: {e}")
+        finally:
+            if temp_client:
+                temp_client.close()
+
+    await send_and_delete_message(context, update.effective_chat.id, f"✅ Link shortener details saved to {success_count}/{len(SHORTENER_DB_URIS)} databases.")
 
 
 async def index_channel_task(context: ContextTypes.DEFAULT_TYPE, channel_id: int, skip: int, user_chat_id: int):
@@ -1163,37 +1191,37 @@ async def on_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TY
 
         # If the bot was promoted to administrator or is the creator
         if new_status in ["administrator", "creator"]:
-            logger.info(f"Bot was added/promoted as admin in group {group_id}. Saving to dedicated groups database.")
-            temp_client = None
-            try:
-                temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
-                temp_client.admin.command('ismaster')
-                temp_db = temp_client["telegram_groups"]
-                temp_groups_col = temp_db["groups"]
-                temp_groups_col.update_one({"_id": group_id}, {"$set": {"_id": group_id}}, upsert=True)
-                logger.info(f"Successfully saved/updated group {group_id} in dedicated groups DB.")
-            except Exception as e:
-                logger.error(f"Failed to save group {group_id} to dedicated DB: {e}")
-            finally:
-                if temp_client:
-                    temp_client.close()
+            logger.info(f"Bot was added/promoted as admin in group {group_id}. Saving to all groups databases.")
+            for uri in GROUPS_DB_URIS:
+                temp_client = None
+                try:
+                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                    temp_db = temp_client["telegram_groups"]
+                    temp_groups_col = temp_db["groups"]
+                    temp_groups_col.update_one({"_id": group_id}, {"$set": {"_id": group_id}}, upsert=True)
+                    logger.info(f"Successfully saved/updated group {group_id} in groups DB at {uri}.")
+                except Exception as e:
+                    logger.error(f"Failed to save group {group_id} to groups DB at {uri}: {e}")
+                finally:
+                    if temp_client:
+                        temp_client.close()
 
         # If the bot was kicked, left, or demoted from admin
         elif old_status in ["administrator", "creator"] and new_status not in ["administrator", "creator"]:
-            logger.info(f"Bot was removed or demoted from admin in group {group_id}. Removing from dedicated groups database.")
-            temp_client = None
-            try:
-                temp_client = MongoClient(GROUPS_DB_URI, serverSelectionTimeoutMS=5000)
-                temp_client.admin.command('ismaster')
-                temp_db = temp_client["telegram_groups"]
-                temp_groups_col = temp_db["groups"]
-                temp_groups_col.delete_one({"_id": group_id})
-                logger.info(f"Successfully removed group {group_id} from dedicated groups DB.")
-            except Exception as e:
-                logger.error(f"Failed to remove group {group_id} from dedicated DB: {e}")
-            finally:
-                if temp_client:
-                    temp_client.close()
+            logger.info(f"Bot was removed or demoted from admin in group {group_id}. Removing from all groups databases.")
+            for uri in GROUPS_DB_URIS:
+                temp_client = None
+                try:
+                    temp_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+                    temp_db = temp_client["telegram_groups"]
+                    temp_groups_col = temp_db["groups"]
+                    temp_groups_col.delete_one({"_id": group_id})
+                    logger.info(f"Successfully removed group {group_id} from groups DB at {uri}.")
+                except Exception as e:
+                    logger.error(f"Failed to remove group {group_id} from groups DB at {uri}: {e}")
+                finally:
+                    if temp_client:
+                        temp_client.close()
 
 
 # ========================
@@ -1796,16 +1824,17 @@ def main():
         logger.critical("Failed to connect to the initial MongoDB URI. Exiting.")
         return
 
-    # Create TTL index for pending requests to expire after 30 minutes
-    try:
-        with MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000) as client:
-            db = client["link_shortener"]
-            collection = db["pending_requests"]
-            # This ensures the index exists and is correct, creating it if necessary.
-            collection.create_index("createdAt", expireAfterSeconds=1800)
-            logger.info("TTL index on 'pending_requests' collection is ensured for 30-minute expiry.")
-    except Exception as e:
-        logger.error(f"Could not create TTL index. Pending links may not expire automatically: {e}")
+    # Create TTL index for pending requests on all shortener DBs
+    for uri in SHORTENER_DB_URIS:
+        try:
+            with MongoClient(uri, serverSelectionTimeoutMS=5000) as client:
+                db = client["link_shortener"]
+                collection = db["pending_requests"]
+                # This ensures the index exists and is correct, creating it if necessary.
+                collection.create_index("createdAt", expireAfterSeconds=1800)
+                logger.info(f"TTL index on 'pending_requests' collection ensured for URI: {uri}")
+        except Exception as e:
+            logger.error(f"Could not create TTL index for URI {uri}. Pending links may not expire automatically: {e}")
 
 
     app = Application.builder().token(BOT_TOKEN).build()
