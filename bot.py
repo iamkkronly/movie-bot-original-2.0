@@ -250,8 +250,8 @@ async def save_pending_request(request_data):
         temp_db = temp_client["link_shortener"]
         pending_col = temp_db["pending_requests"]
 
-        # Add a timestamp to the request data
-        request_data['timestamp'] = datetime.datetime.utcnow()
+        # Add a 'createdAt' timestamp for the TTL index
+        request_data['createdAt'] = datetime.datetime.utcnow()
 
         pending_col.insert_one(request_data)
         return True
@@ -1795,6 +1795,18 @@ def main():
     if not connect_to_mongo():
         logger.critical("Failed to connect to the initial MongoDB URI. Exiting.")
         return
+
+    # Create TTL index for pending requests to expire after 30 minutes
+    try:
+        with MongoClient(SHORTENER_DB_URI, serverSelectionTimeoutMS=5000) as client:
+            db = client["link_shortener"]
+            collection = db["pending_requests"]
+            # This ensures the index exists and is correct, creating it if necessary.
+            collection.create_index("createdAt", expireAfterSeconds=1800)
+            logger.info("TTL index on 'pending_requests' collection is ensured for 30-minute expiry.")
+    except Exception as e:
+        logger.error(f"Could not create TTL index. Pending links may not expire automatically: {e}")
+
 
     app = Application.builder().token(BOT_TOKEN).build()
 
